@@ -1359,19 +1359,27 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const itemType = payload?.type;
     
     if (itemType === "reasoning" && mode !== "dialogue") {
+       const isEncrypted = !payload.content && !!payload.encrypted_content;
        parts.push(
           <div className="bg-purple-500/5 border border-purple-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-purple-500/50 group">
             <div className="flex justify-between items-start mb-3">
               <div className="flex items-center gap-2 text-purple-400 font-bold mb-3 text-xs uppercase tracking-widest">
-                <Brain size={16} /> Reasoning
+                <Brain size={16} /> Reasoning {isEncrypted && <span className="text-[9px] font-mono normal-case tracking-normal text-purple-400/70 bg-purple-400/10 px-1.5 py-0.5 rounded border border-purple-400/30">encrypted</span>}
               </div>
               {renderTimestamp()}
             </div>
-            <div className="text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{
-              Array.isArray(payload.content)
-                ? payload.content.map((c: any) => c?.text ?? c?.summary ?? c?.content ?? (typeof c === 'string' ? c : "")).filter(Boolean).join("\n\n")
-                : (typeof payload.content === 'string' ? payload.content : (payload.summary ?? payload.text ?? ""))
-            }</div>
+            {isEncrypted ? (
+              <div className="text-slate-500 italic text-[11px] leading-relaxed">
+                Extended thinking is sealed by the API — the local log stores only the cryptographic signature, not the reasoning text.
+                <div className="mt-2 text-[9px] font-mono text-slate-600 break-all opacity-60">sig: {String(payload.encrypted_content || "").slice(0, 64)}…</div>
+              </div>
+            ) : (
+              <div className="text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{
+                Array.isArray(payload.content)
+                  ? payload.content.map((c: any) => c?.text ?? c?.summary ?? c?.content ?? (typeof c === 'string' ? c : "")).filter(Boolean).join("\n\n")
+                  : (typeof payload.content === 'string' ? payload.content : (payload.summary ?? payload.text ?? ""))
+              }</div>
+            )}
           </div>
        );
     }
