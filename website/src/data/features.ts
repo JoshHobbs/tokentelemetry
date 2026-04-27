@@ -8,15 +8,15 @@ export type Feature = {
 
 export const FEATURES: Feature[] = [
   {
-    id: "cost",
-    label: "Cost",
-    headline: "Per-model pricing, not flat-rate guesswork.",
+    id: "dashboard",
+    label: "Dashboard",
+    headline: "A bird's-eye view of your entire agent fleet.",
     bullets: [
-      "Input, output, and cached-read tiers split for every model — Opus, Sonnet, GPT-5, Gemini 3, GLM, Devstral.",
-      "Cache efficiency surfaced as a real saving, not a vanity metric.",
-      "Daily / weekly / monthly burn rate. See a $4 session before it becomes a $400 month.",
+      "Real-time monitoring of active traces across all detected tools.",
+      "High-level metrics for total sessions, token burn, and cost estimates.",
+      "Agent distribution and model usage leaderboards, updated live.",
     ],
-    screenshot: "/screenshots/cost.png",
+    screenshot: "/screenshots/dashboard.png",
   },
   {
     id: "traces",
