@@ -1390,6 +1390,251 @@ def _memory_preview(p: Path, scope: str, agent: str):
     except: return None
     return {"scope": scope, "agent": agent, "path": str(p), "name": p.name, "preview": txt[:2000], "truncated": len(txt) > 2000, "size": len(txt)}
 
+# ---- Plugin/extension collection (v1) ---------------------------------------
+# Each harness exposes a "plugin"/"extension" surface in its own way. We
+# normalize to: {name, version, description, scope, agent, source, installPath,
+# enabled, marketplace, components}. Failures return [] — never raise.
+
+ANTIGRAVITY_EXT_DIR = HOME / ".antigravity" / "extensions"
+VSCODE_EXT_DIR = HOME / ".vscode" / "extensions"
+GEMINI_EXT_DIR = GEMINI_DIR / "extensions"
+QWEN_EXT_DIR = QWEN_DIR / "extensions"
+CLAUDE_INSTALLED_PLUGINS = CLAUDE_DIR / "plugins" / "installed_plugins.json"
+CODEX_PLUGIN_CACHE = CODEX_DIR / "plugins" / "cache"
+
+# Chat-related contributes keys we consider "Copilot/Antigravity plugin-shaped".
+_VSCODE_CHAT_KEYS = (
+    "chatParticipants", "languageModelTools", "chatModes", "chatAgents",
+    "chatPromptFiles", "chatSkills", "languageModelToolSets",
+    "languageModelChatProviders",
+)
+
+def _claude_plugin_ref(p: Path) -> Optional[str]:
+    """Extract '<plugin>@<marketplace>' from a Claude plugin source path.
+    Handles both .../plugins/cache/<mp>/<plugin>/<ver>/... and
+    .../plugins/marketplaces/<mp>/plugins/<plugin>/... layouts.
+    """
+    try:
+        parts = p.parts
+        i = parts.index("plugins")
+        sub = parts[i + 1]
+        if sub == "cache" and len(parts) >= i + 4:
+            return f"{parts[i + 3]}@{parts[i + 2]}"
+        if sub == "marketplaces" and len(parts) >= i + 5 and parts[i + 3] == "plugins":
+            return f"{parts[i + 4]}@{parts[i + 2]}"
+    except (ValueError, IndexError):
+        pass
+    return None
+
+def _tag_plugin_refs(items: List[dict], plugins: List[dict]) -> None:
+    """Stamp `pluginRef` on any item whose source path is inside a plugin's
+    installPath. Longest-prefix match wins. In-place; idempotent (won't clobber
+    existing pluginRef set inline by the Claude plugin-bundled loops)."""
+    if not plugins or not items:
+        return
+    paths = sorted(
+        ((p["installPath"], f"{p['name']}@{p.get('marketplace') or p.get('agent')}")
+         for p in plugins if p.get("installPath")),
+        key=lambda kv: -len(kv[0]),
+    )
+    for it in items:
+        if it.get("pluginRef"): continue
+        src = it.get("source") or ""
+        for ip, ref in paths:
+            if ip and src.startswith(ip):
+                it["pluginRef"] = ref
+                break
+
+def _collect_plugins_vscode_style(ext_dir: Path, scope: str, agent: str, marketplace: str) -> List[dict]:
+    """VS Code-fork extensions (Copilot via ~/.vscode/extensions, Antigravity
+    via ~/.antigravity/extensions). Filtered to chat-relevant contributions.
+    """
+    if not ext_dir.exists(): return []
+    enabled_set: Optional[Set[str]] = None
+    enabled_file = ext_dir / "extensions.json"
+    if enabled_file.exists():
+        arr = _read_json(enabled_file)
+        if isinstance(arr, list):
+            enabled_set = set()
+            for e in arr:
+                if isinstance(e, dict):
+                    ident = (e.get("identifier") or {}).get("id")
+                    if isinstance(ident, str): enabled_set.add(ident.lower())
+    out = []
+    try: entries = list(ext_dir.iterdir())
+    except: return []
+    for d in entries:
+        if not d.is_dir(): continue
+        pkg = _read_json(d / "package.json")
+        if not isinstance(pkg, dict): continue
+        c = pkg.get("contributes") or {}
+        components = [k for k in _VSCODE_CHAT_KEYS if isinstance(c, dict) and c.get(k)]
+        if not components: continue
+        publisher = pkg.get("publisher") or ""
+        name = pkg.get("name") or d.name
+        full = f"{publisher}.{name}" if publisher else name
+        out.append({
+            "name": full,
+            "version": pkg.get("version") or "",
+            "description": (pkg.get("description") or "")[:300],
+            "scope": scope,
+            "agent": agent,
+            "source": str(d / "package.json"),
+            "installPath": str(d),
+            "enabled": (enabled_set is None) or (full.lower() in enabled_set),
+            "marketplace": marketplace,
+            "components": components,
+        })
+    return out
+
+def _collect_plugins_gemini_style(ext_root: Path, scope: str, agent: str,
+                                  manifest_names=("gemini-extension.json",)) -> List[dict]:
+    """Gemini CLI extensions (also covers Qwen Code's extension layout)."""
+    if not ext_root.exists(): return []
+    enablement: Dict[str, dict] = {}
+    enab_file = ext_root / "extension-enablement.json"
+    if enab_file.exists():
+        d = _read_json(enab_file)
+        if isinstance(d, dict): enablement = d
+    out = []
+    try: entries = list(ext_root.iterdir())
+    except: return []
+    for ext_dir in entries:
+        if not ext_dir.is_dir(): continue
+        manifest = next((ext_dir / n for n in manifest_names if (ext_dir / n).exists()), None)
+        if not manifest: continue
+        d = _read_json(manifest)
+        if not isinstance(d, dict): continue
+        name = d.get("name") or ext_dir.name
+        components = [k for k in ("mcpServers", "contextFileName", "commands", "excludeTools") if d.get(k)]
+        ent = enablement.get(name)
+        enabled = True
+        if isinstance(ent, dict):
+            enabled = bool(ent.get("overrides")) or bool(ent.get("enabled", True))
+        out.append({
+            "name": name,
+            "version": d.get("version") or "",
+            "description": (d.get("description") or "")[:300],
+            "scope": scope,
+            "agent": agent,
+            "source": str(manifest),
+            "installPath": str(ext_dir),
+            "enabled": enabled,
+            "marketplace": None,
+            "components": components,
+        })
+    return out
+
+def _collect_plugins_claude(scope: str, project: Optional[Path] = None) -> List[dict]:
+    """Read Claude's installed_plugins.json registry."""
+    if not CLAUDE_INSTALLED_PLUGINS.exists(): return []
+    d = _read_json(CLAUDE_INSTALLED_PLUGINS)
+    if not isinstance(d, dict): return []
+    plugins = d.get("plugins") or {}
+    if not isinstance(plugins, dict): return []
+    out = []
+    for full_name, entries in plugins.items():
+        if "@" not in full_name: continue
+        plugin_name, marketplace = full_name.split("@", 1)
+        if not isinstance(entries, list): continue
+        for e in entries:
+            if not isinstance(e, dict): continue
+            entry_scope = e.get("scope")
+            our_scope = "user" if entry_scope == "user" else "project"
+            if scope != our_scope: continue
+            if our_scope == "project":
+                if not project or e.get("projectPath") != str(project): continue
+            install_path = e.get("installPath") or ""
+            description = ""
+            manifest = Path(install_path) / ".claude-plugin" / "plugin.json" if install_path else None
+            if manifest and manifest.exists():
+                m = _read_json(manifest)
+                if isinstance(m, dict):
+                    description = (m.get("description") or "")[:300]
+            comp = []
+            ip = Path(install_path) if install_path else None
+            if ip and ip.exists():
+                for sub in ("skills", "commands", "agents", "hooks", "mcp", "prompts"):
+                    if (ip / sub).exists(): comp.append(sub)
+            out.append({
+                "name": plugin_name,
+                "version": e.get("version") or "",
+                "description": description,
+                "scope": our_scope,
+                "agent": "claude",
+                "source": str(CLAUDE_INSTALLED_PLUGINS),
+                "installPath": install_path,
+                "enabled": True,
+                "marketplace": marketplace,
+                "components": comp,
+            })
+    return out
+
+def _collect_plugins_codex(scope: str) -> List[dict]:
+    """Codex bundled plugins under ~/.codex/plugins/cache/<mp>/<plugin>/<ver>/.
+    No manifest; metadata is path-derived."""
+    if scope != "user" or not CODEX_PLUGIN_CACHE.exists(): return []
+    out = []
+    try: marketplaces = list(CODEX_PLUGIN_CACHE.iterdir())
+    except: return []
+    for mp in marketplaces:
+        if not mp.is_dir(): continue
+        try: plugins = list(mp.iterdir())
+        except: continue
+        for plugin in plugins:
+            if not plugin.is_dir(): continue
+            try: versions = [v for v in plugin.iterdir() if v.is_dir()]
+            except: continue
+            if not versions: continue
+            ver_dir = sorted(versions, key=lambda v: v.name)[-1]
+            out.append({
+                "name": plugin.name,
+                "version": ver_dir.name,
+                "description": "",
+                "scope": "user",
+                "agent": "codex",
+                "source": str(ver_dir),
+                "installPath": str(ver_dir),
+                "enabled": True,
+                "marketplace": mp.name,
+                "components": [],
+            })
+    return out
+
+def _collect_plugins_cursor(scope: str, project: Optional[Path] = None) -> List[dict]:
+    return []  # TODO v1.1: Cursor plugin layout still in flux
+
+def _collect_plugins_opencode(scope: str, project: Optional[Path] = None) -> List[dict]:
+    return []  # TODO v1.1: OpenCode plugin layout still in flux
+
+def _collect_all_plugins(project: Optional[Path]) -> List[dict]:
+    plugins: List[dict] = []
+    # User scope
+    plugins += _collect_plugins_claude("user")
+    plugins += _collect_plugins_codex("user")
+    plugins += _collect_plugins_gemini_style(GEMINI_EXT_DIR, "user", "gemini")
+    plugins += _collect_plugins_gemini_style(QWEN_EXT_DIR, "user", "qwen",
+                                             ("qwen-extension.json", "gemini-extension.json"))
+    plugins += _collect_plugins_vscode_style(ANTIGRAVITY_EXT_DIR, "user", "antigravity", "antigravity")
+    plugins += _collect_plugins_vscode_style(VSCODE_EXT_DIR, "user", "copilot", "vscode")
+    plugins += _collect_plugins_cursor("user")
+    plugins += _collect_plugins_opencode("user")
+    # Project scope
+    if project:
+        plugins += _collect_plugins_claude("project", project)
+        plugins += _collect_plugins_gemini_style(project / ".gemini" / "extensions", "project", "gemini")
+        plugins += _collect_plugins_gemini_style(project / ".qwen" / "extensions", "project", "qwen",
+                                                 ("qwen-extension.json", "gemini-extension.json"))
+        plugins += _collect_plugins_cursor("project", project)
+        plugins += _collect_plugins_opencode("project", project)
+    # Dedupe by (name, scope, agent)
+    seen: Set[tuple] = set(); deduped = []
+    for p in plugins:
+        key = (p.get("name"), p.get("scope"), p.get("agent"))
+        if key in seen: continue
+        seen.add(key); deduped.append(p)
+    return deduped
+
 @app.get("/config")
 async def get_config(project: Optional[str] = None):
     """Return skills, MCPs, and memory files for user scope + optional project scope."""
@@ -1409,7 +1654,10 @@ async def get_config(project: Optional[str] = None):
             s = _parse_skill_md(skill_md)
             if s and s["name"] not in seen_names:
                 seen_names.add(s["name"])
-                skills.append({**s, "scope": "user", "agent": "claude", "source": str(skill_md)})
+                row = {**s, "scope": "user", "agent": "claude", "source": str(skill_md)}
+                ref = _claude_plugin_ref(skill_md)
+                if ref: row["pluginRef"] = ref
+                skills.append(row)
     for p in [CLAUDE_DIR / "settings.json", Path(HOME) / ".claude.json"]:
         mcps += _mcps_from_claude_settings(p, "user")
     claude_md = CLAUDE_DIR / "CLAUDE.md"
@@ -1436,7 +1684,10 @@ async def get_config(project: Optional[str] = None):
                             k, v = line.split(":", 1)
                             if k.strip().lower() == "description":
                                 description = v.strip().strip('"').strip("'")
-            commands.append({"name": name, "description": description[:200], "scope": "user", "agent": "claude", "source": str(md)})
+            row = {"name": name, "description": description[:200], "scope": "user", "agent": "claude", "source": str(md)}
+            ref = _claude_plugin_ref(md)
+            if ref: row["pluginRef"] = ref
+            commands.append(row)
 
     # Codex
     mcps += _mcps_from_codex_toml(CODEX_DIR / "config.toml", "user")
@@ -1450,6 +1701,10 @@ async def get_config(project: Optional[str] = None):
 
     # Gemini
     mcps += _mcps_from_json(GEMINI_DIR / "settings.json", "user", "gemini")
+    skills += _collect_skills(GEMINI_DIR, "user", "gemini")
+
+    # Qwen
+    skills += _collect_skills(QWEN_DIR, "user", "qwen")
 
     # ---- PROJECT scope ----
     project_valid = False
@@ -1480,6 +1735,10 @@ async def get_config(project: Optional[str] = None):
 
             # Gemini
             mcps += _mcps_from_json(proj / ".gemini" / "settings.json", "project", "gemini")
+            skills += _collect_skills(proj / ".gemini", "project", "gemini")
+
+            # Qwen
+            skills += _collect_skills(proj / ".qwen", "project", "qwen")
 
     # Dedupe skills by (name, scope)
     seen_skills = set(); deduped_skills = []
@@ -1495,6 +1754,16 @@ async def get_config(project: Optional[str] = None):
         if key in seen: continue
         seen.add(key); deduped.append(m)
 
+    # Plugins (project arg already validated above)
+    plugins = _collect_all_plugins(Path(project) if project_valid else None)
+
+    # Stamp pluginRef on items whose source falls inside a plugin's installPath.
+    # Inline-set refs (Claude plugin-bundled blocks) are preserved by _tag_plugin_refs.
+    _tag_plugin_refs(deduped_skills, plugins)
+    _tag_plugin_refs(commands, plugins)
+    _tag_plugin_refs(subagents, plugins)
+    _tag_plugin_refs(deduped, plugins)
+
     return {
         "project": project,
         "project_valid": project_valid,
@@ -1503,12 +1772,14 @@ async def get_config(project: Optional[str] = None):
         "memory": memory,
         "commands": commands,
         "subagents": subagents,
+        "plugins": plugins,
         "counts": {
             "skills": len(deduped_skills),
             "mcps": len(deduped),
             "memory_files": len(memory),
             "commands": len(commands),
             "subagents": len(subagents),
+            "plugins": len(plugins),
         },
     }
 

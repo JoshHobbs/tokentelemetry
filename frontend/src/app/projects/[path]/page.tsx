@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo, Fragment } from "react";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Folder, Activity, Database, Terminal, Clock, Cpu, Users, ClipboardList, Sparkles, Zap, GitBranch, Orbit, Search, FileText, Settings2, Wrench, BookOpen, Globe, Package } from "lucide-react";
+import { ArrowLeft, Folder, Activity, Database, Terminal, Clock, Cpu, Users, ClipboardList, Sparkles, Zap, GitBranch, Orbit, Search, FileText, Settings2, Wrench, BookOpen, Globe, Package, Puzzle } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
 import ReactMarkdown from "react-markdown";
@@ -431,6 +431,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
   const memory = config.memory || [];
   const commands = config.commands || [];
   const subagents = config.subagents || [];
+  const plugins = config.plugins || [];
 
   const bucket = <T extends { scope: string }>(arr: T[]) => ({
     project: arr.filter(x => x.scope === "project"),
@@ -441,9 +442,14 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
   const memb = bucket(memory);
   const cb = bucket(commands);
   const agb = bucket(subagents);
+  const pb = bucket(plugins);
 
-  const projectHasAny = sb.project.length + mb.project.length + memb.project.length + cb.project.length + agb.project.length > 0;
-  const userHasAny = sb.user.length + mb.user.length + memb.user.length + cb.user.length + agb.user.length > 0;
+  const projectHasAny = sb.project.length + mb.project.length + memb.project.length + cb.project.length + agb.project.length + pb.project.length > 0;
+  const userHasAny = sb.user.length + mb.user.length + memb.user.length + cb.user.length + agb.user.length + pb.user.length > 0;
+
+  const renderPluginRef = (ref?: string) => ref ? (
+    <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-300 truncate max-w-full inline-flex items-center gap-1" title={`from plugin ${ref}`}><Puzzle size={9}/>{ref}</span>
+  ) : null;
 
   const renderSkill = (s: any) => (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-colors">
@@ -452,6 +458,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
         <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${AGENT_TONE[s.agent] || "text-slate-400 border-slate-700"}`}>{s.agent}</span>
       </div>
       {s.description && <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-3">{s.description}</p>}
+      {s.pluginRef && <div className="mt-2">{renderPluginRef(s.pluginRef)}</div>}
       <div className="text-[9px] font-mono text-slate-600 mt-3 truncate" title={s.source}>{s.source?.replace(/^.*\//, "")}</div>
     </div>
   );
@@ -466,6 +473,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
       <div className="flex flex-wrap gap-1.5 mt-2">
         {a.model && <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">{a.model}</span>}
         {a.tools && <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 truncate max-w-full" title={a.tools}>{a.tools}</span>}
+        {renderPluginRef(a.pluginRef)}
       </div>
     </div>
   );
@@ -477,6 +485,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
         <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${AGENT_TONE[c.agent] || "text-slate-400 border-slate-700"}`}>{c.agent}</span>
       </div>
       {c.description && <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-3">{c.description}</p>}
+      {c.pluginRef && <div className="mt-2">{renderPluginRef(c.pluginRef)}</div>}
     </div>
   );
 
@@ -489,6 +498,25 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
       {m.command && <div className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800 mt-2 truncate" title={m.command}><Package size={10} className="inline mr-1 opacity-60"/>{m.command}</div>}
       {m.url && <div className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800 mt-2 truncate" title={m.url}><Globe size={10} className="inline mr-1 opacity-60"/>{m.url}</div>}
       {m.type && <div className="text-[9px] font-mono text-slate-600 mt-2 uppercase tracking-widest">{m.type}</div>}
+      {m.pluginRef && <div className="mt-2">{renderPluginRef(m.pluginRef)}</div>}
+    </div>
+  );
+
+  const renderPlugin = (p: any) => (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-violet-500/40 transition-colors">
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <span className="text-sm font-black text-white truncate flex items-center gap-2"><Puzzle size={12} className="text-violet-400"/>{p.name}</span>
+        <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${AGENT_TONE[p.agent] || "text-slate-400 border-slate-700"}`}>{p.agent}</span>
+      </div>
+      {p.description && <p className="text-[11px] text-slate-400 leading-relaxed line-clamp-2 mb-2">{p.description}</p>}
+      <div className="flex flex-wrap gap-1.5">
+        {p.version && <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">v{p.version}</span>}
+        {p.marketplace && <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-300">{p.marketplace}</span>}
+        {p.enabled === false && <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400">disabled</span>}
+        {(p.components || []).slice(0, 4).map((c: string, i: number) => (
+          <span key={i} className="text-[9px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400">{c}</span>
+        ))}
+      </div>
     </div>
   );
 
@@ -515,7 +543,8 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
   return (
     <div className="space-y-8">
       {/* Summary — project counts primary, user counts muted */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <SumCard icon={<Puzzle size={16}/>} label="Plugins" value={pb.project.length} userValue={pb.user.length} tone="violet" />
         <SumCard icon={<Users size={16}/>} label="Subagents" value={agb.project.length} userValue={agb.user.length} tone="purple" />
         <SumCard icon={<BookOpen size={16}/>} label="Skills" value={sb.project.length} userValue={sb.user.length} tone="cyan" />
         <SumCard icon={<Terminal size={16}/>} label="Commands" value={cb.project.length} userValue={cb.user.length} tone="emerald" />
@@ -533,10 +562,11 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
 
         {!projectHasAny ? (
           <div className="p-12 text-center bg-slate-900/50 rounded-2xl border border-dashed border-slate-800 text-slate-600 italic">
-            No project-scoped skills, commands, or MCPs found in this workspace.
+            No project-scoped plugins, skills, commands, or MCPs found in this workspace.
           </div>
         ) : (
           <div className="space-y-6">
+            {pb.project.length > 0 && (<div><SectionHead icon={<Puzzle size={14} className="text-violet-400"/>} label="Plugins" count={pb.project.length}/><ScopeGroup items={pb.project} render={renderPlugin}/></div>)}
             {agb.project.length > 0 && (<div><SectionHead icon={<Users size={14} className="text-purple-400"/>} label="Subagents" count={agb.project.length}/><ScopeGroup items={agb.project} render={renderSubagent}/></div>)}
             {sb.project.length > 0 && (<div><SectionHead icon={<BookOpen size={14} className="text-cyan-400"/>} label="Skills" count={sb.project.length}/><ScopeGroup items={sb.project} render={renderSkill}/></div>)}
             {cb.project.length > 0 && (<div><SectionHead icon={<Terminal size={14} className="text-emerald-400"/>} label="Commands" count={cb.project.length}/><ScopeGroup items={cb.project} render={renderCommand}/></div>)}
@@ -558,6 +588,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
               </div>
             </div>
             <div className="flex items-center gap-4 text-[10px] font-mono text-slate-500">
+              <span><span className="text-violet-400 font-black">{pb.user.length}</span> plugins</span>
               <span><span className="text-purple-400 font-black">{agb.user.length}</span> subagents</span>
               <span><span className="text-cyan-400 font-black">{sb.user.length}</span> skills</span>
               <span><span className="text-emerald-400 font-black">{cb.user.length}</span> commands</span>
@@ -567,6 +598,7 @@ function ConfigSection({ config, loading }: { config: any; loading: boolean }) {
             </div>
           </summary>
           <div className="p-6 border-t border-slate-800 space-y-6">
+            {pb.user.length > 0 && (<div><SectionHead icon={<Puzzle size={14} className="text-violet-400"/>} label="Plugins" count={pb.user.length}/><ScopeGroup items={pb.user} render={renderPlugin}/></div>)}
             {agb.user.length > 0 && (<div><SectionHead icon={<Users size={14} className="text-purple-400"/>} label="Subagents" count={agb.user.length}/><ScopeGroup items={agb.user} render={renderSubagent}/></div>)}
             {sb.user.length > 0 && (<div><SectionHead icon={<BookOpen size={14} className="text-cyan-400"/>} label="Skills" count={sb.user.length}/><ScopeGroup items={sb.user} render={renderSkill}/></div>)}
             {cb.user.length > 0 && (<div><SectionHead icon={<Terminal size={14} className="text-emerald-400"/>} label="Commands" count={cb.user.length}/><ScopeGroup items={cb.user} render={renderCommand}/></div>)}
@@ -620,8 +652,8 @@ function ScopeBlock({ title, icon, projectItems, userItems, renderItem }: { titl
   );
 }
 
-function SumCard({ icon, label, value, userValue, tone }: { icon: React.ReactNode; label: string; value: number; userValue?: number; tone: "cyan" | "emerald" | "amber" | "purple" }) {
-  const toneCls = tone === "cyan" ? "border-cyan-500/20 bg-cyan-500/5 text-cyan-400" : tone === "emerald" ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : tone === "purple" ? "border-purple-500/20 bg-purple-500/5 text-purple-400" : "border-amber-500/20 bg-amber-500/5 text-amber-400";
+function SumCard({ icon, label, value, userValue, tone }: { icon: React.ReactNode; label: string; value: number; userValue?: number; tone: "cyan" | "emerald" | "amber" | "purple" | "violet" }) {
+  const toneCls = tone === "cyan" ? "border-cyan-500/20 bg-cyan-500/5 text-cyan-400" : tone === "emerald" ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400" : tone === "purple" ? "border-purple-500/20 bg-purple-500/5 text-purple-400" : tone === "violet" ? "border-violet-500/20 bg-violet-500/5 text-violet-400" : "border-amber-500/20 bg-amber-500/5 text-amber-400";
   return (
     <div className={`p-5 rounded-2xl border ${toneCls}`}>
       <div className="flex items-center gap-2 mb-2 opacity-80">{icon}<span className="text-[10px] font-black uppercase tracking-widest">{label}</span></div>
