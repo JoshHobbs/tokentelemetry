@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Activity, Clock, Database, Terminal, Sparkles, TrendingUp, Cpu, Zap, GitBranch, Orbit, ArrowRight, MousePointer2, Code2, Layers } from "lucide-react";
-import { format } from "date-fns";
 import Link from "next/link";
+import { format } from "date-fns";
+import {
+  Activity, Clock, TrendingUp, Folders, DollarSign, Cpu, ArrowUpRight, Radio, Terminal,
+} from "lucide-react";
+
+import { useResource } from "@/lib/api";
+import { AGENTS, getAgent, type AgentKey } from "@/lib/agents";
+import {
+  PageHeader, StatTile, Section, Card, CardHeader, CardTitle, CardEyebrow,
+  Table, THead, TBody, TR, TH, TD, AgentBadge, Badge, Button, EmptyState, Skeleton,
+} from "@/components/ui";
 
 interface Session {
   id: string;
@@ -12,331 +20,324 @@ interface Session {
   timestamp: string;
   display?: string;
   text?: string;
-  tokens?: {
-    input: number;
-    output: number;
-    cached: number;
-    total: number;
-  };
+  tokens?: { input: number; output: number; cached: number; total: number };
   cost?: number;
 }
 
-const AGENT_CONFIG: Record<string, { label: string, color: string, icon: any }> = {
-  claude: { label: "Claude", color: "orange", icon: Terminal },
-  codex: { label: "Codex", color: "purple", icon: Database },
-  gemini: { label: "Gemini", color: "cyan", icon: Sparkles },
-  antigravity: { label: "Antigravity", color: "emerald", icon: Orbit },
-  qwen: { label: "Qwen", color: "blue", icon: Cpu },
-  vibe: { label: "Vibe", color: "pink", icon: Zap },
-  cursor: { label: "Cursor", color: "blue", icon: MousePointer2 },
-  // ollama: { label: "Ollama", color: "blue", icon: Zap },
-  copilot: { label: "Copilot", color: "indigo", icon: GitBranch },
-  opencode: { label: "OpenCode", color: "amber", icon: Code2 }
-};
-
-const AGENT_HEX: Record<string, string> = {
-  claude: "#f97316", codex: "#a855f7", gemini: "#06b6d4",
-  antigravity: "#10b981", qwen: "#3b82f6", vibe: "#f472b6", cursor: "#3b82f6", copilot: "#6366f1", opencode: "#f59e0b"
-};
-
-// interface QualityTotals {
-//   edit_turns: number;
-//   retry_turns: number;
-//   one_shot_rate: number | null;
-//   retry_rate: number | null;
-//   measured_sessions: number;
-// }
-interface AnalyticsTotals {
-  cache_hit_pct: number | null;
-  // quality: QualityTotals;
+interface AnalyticsResponse {
+  by_model?: Record<string, { total: number; session_count: number; agent: string }>;
+  pricing_updated?: string;
+  total?: { cache_hit_pct: number | null };
 }
 
 export default function Home() {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [availableAgents, setAvailableAgents] = useState<string[]>([]);
-  const [byModel, setByModel] = useState<Record<string, { total: number; session_count: number; agent: string }>>({});
-  const [pricingUpdated, setPricingUpdated] = useState<string>("");
-  const [analyticsTotals, setAnalyticsTotals] = useState<AnalyticsTotals | null>(null);
-  const [loading, setLoading] = useState(true);
+  const sessionsRes = useResource<Session[]>("/sessions", { pollMs: 15_000, initial: [] });
+  const agentsRes   = useResource<string[]>("/agents", { pollMs: 30_000, initial: [] });
+  const analyticsRes = useResource<AnalyticsResponse>("/analytics", { pollMs: 30_000 });
 
-  useEffect(() => {
-    const load = () => Promise.all([
-      fetch("http://127.0.0.1:8000/sessions").then(res => res.json()),
-      fetch("http://127.0.0.1:8000/agents").then(res => res.json()),
-      fetch("http://127.0.0.1:8000/analytics").then(res => res.json()).catch(() => ({}))
-    ]).then(([sessionsData, agentsData, analyticsData]) => {
-      const ts = (s: Session) => {
-        const t = s.timestamp ? new Date(s.timestamp).getTime() : NaN;
-        return Number.isFinite(t) ? t : -Infinity;
-      };
-      setSessions(sessionsData.sort((a: Session, b: Session) => ts(b) - ts(a)));
-      setAvailableAgents(agentsData);
-      setByModel(analyticsData?.by_model || {});
-      setPricingUpdated(analyticsData?.pricing_updated || "");
-      setAnalyticsTotals(analyticsData?.total || null);
-      setLoading(false);
-    }).catch(err => {
-      console.error("Failed to fetch dashboard data:", err);
-      setLoading(false);
-    });
-    load();
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
-  }, []);
+  const sessions = (sessionsRes.data ?? []).slice().sort((a, b) => {
+    const ta = new Date(a.timestamp).getTime();
+    const tb = new Date(b.timestamp).getTime();
+    return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+  });
+  const availableAgents = agentsRes.data ?? [];
+  const byModel = analyticsRes.data?.by_model ?? {};
+  const pricingUpdated = analyticsRes.data?.pricing_updated;
 
-  // const measuredSessions = analyticsTotals?.quality?.measured_sessions ?? 0;
-  // const editTurns = analyticsTotals?.quality?.edit_turns ?? 0;
+  const totalTokens = sessions.reduce((a, s) => a + (s.tokens?.total ?? 0), 0);
+  const totalCost   = sessions.reduce((a, s) => a + (s.cost ?? 0), 0);
+  const projectCount = new Set(sessions.map((s) => s.project)).size;
 
   const modelRows = Object.entries(byModel)
     .map(([name, s]) => ({ name, ...s }))
     .sort((a, b) => b.session_count - a.session_count);
   const totalModelSessions = modelRows.reduce((a, r) => a + r.session_count, 0) || 1;
 
-  const totalTokens = sessions.reduce((acc, s) => acc + (s.tokens?.total || 0), 0);
-  const totalCost = sessions.reduce((acc, s) => acc + (s.cost || 0), 0);
+  const loading = sessionsRes.loading;
 
   return (
-    <div className="p-8 max-w-[1600px] mx-auto space-y-10 pb-20">
-      <header className="flex justify-between items-end border-b border-slate-800 pb-6 text-slate-100">
-        <div>
-          <h1 className="text-4xl font-black text-white tracking-tighter flex items-center gap-3">
-            <Activity className="text-blue-500" size={36} strokeWidth={3} />
-            DASHBOARD
-          </h1>
-          <p className="text-slate-500 mt-1 font-medium">Monitoring {sessions.length} active traces across {availableAgents.length} detected tools.</p>
-        </div>
-        <div className="flex gap-2">
-           <div className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-              Live System
-           </div>
-        </div>
-      </header>
+    <div className="px-8 py-8 max-w-[1600px] mx-auto space-y-10 pb-20">
+      <PageHeader
+        eyebrow="Overview"
+        title="Dashboard"
+        description={
+          loading
+            ? "Loading telemetry…"
+            : `Monitoring ${sessions.length.toLocaleString()} traces across ${availableAgents.length} detected ${availableAgents.length === 1 ? "agent" : "agents"}.`
+        }
+        icon={<Activity size={20} strokeWidth={2.25} />}
+        actions={
+          <>
+            <Badge variant="success" size="sm" className="h-9 px-2.5">
+              <span className="relative flex w-1.5 h-1.5">
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+              </span>
+              Live
+            </Badge>
+            <Link href="/analytics">
+              <Button variant="secondary" size="md">
+                Analytics <ArrowUpRight size={14} />
+              </Button>
+            </Link>
+          </>
+        }
+      />
 
-      {/* Primary Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Total Sessions" value={sessions.length} icon={<Clock className="text-blue-400" />} color="blue" />
-        <StatCard title="Total Tokens" value={totalTokens > 1000000 ? `${(totalTokens / 1000000).toFixed(1)}M` : totalTokens.toLocaleString()} icon={<TrendingUp className="text-emerald-400" />} color="emerald" />
-        <StatCard title="Active Projects" value={new Set(sessions.map(s => s.project)).size} icon={<Activity className="text-blue-400" />} color="blue" />
-        <StatCard title="Cost Estimate" value={totalCost < 0.01 && totalCost > 0 ? "<$0.01" : `$${totalCost.toFixed(2)}`} subValue={pricingUpdated ? `Rates updated ${pricingUpdated}` : undefined} icon={<Zap className="text-amber-400" />} color="amber" />
-      </div>
+      {/* KPI strip */}
+      <Section title="Key metrics">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatTile
+            label="Sessions"
+            value={loading ? <Skeleton className="h-8 w-20" /> : sessions.length.toLocaleString()}
+            icon={<Clock size={16} />}
+            accent="var(--tt-brand)"
+          />
+          <StatTile
+            label="Tokens"
+            value={loading ? <Skeleton className="h-8 w-20" /> : formatTokens(totalTokens)}
+            icon={<TrendingUp size={16} />}
+            accent="var(--tt-success)"
+          />
+          <StatTile
+            label="Active Projects"
+            value={loading ? <Skeleton className="h-8 w-12" /> : projectCount}
+            icon={<Folders size={16} />}
+            accent="var(--tt-info)"
+          />
+          <StatTile
+            label="Cost (est.)"
+            value={loading ? <Skeleton className="h-8 w-20" /> : formatCost(totalCost)}
+            hint={pricingUpdated ? `Rates updated ${pricingUpdated}` : undefined}
+            icon={<DollarSign size={16} />}
+            accent="var(--tt-warn)"
+          />
+        </div>
+      </Section>
 
-      {/* Dynamic Agent Roster */}
+      {/* Connected agents */}
       {availableAgents.length > 0 && (
-        <section>
-          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-[0.2em] mb-4 ml-1">Connected Agents</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
-            {availableAgents.map(agentKey => {
-              const config = AGENT_CONFIG[agentKey];
-              if (!config) return null;
-              const count = sessions.filter(s => s.agent === agentKey).length;
-              const Icon = config.icon;
+        <Section
+          title="Connected agents"
+          description="Detected from local agent runtimes — counts reflect sessions captured."
+        >
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 gap-3">
+            {availableAgents.map((k) => {
+              const meta = AGENTS[k as AgentKey];
+              if (!meta) return null;
+              const count = sessions.filter((s) => s.agent === k).length;
+              const Icon = meta.icon;
               return (
-                <AgentStat
-                  key={agentKey}
-                  label={config.label}
-                  count={count}
-                  color={config.color}
-                  icon={<Icon size={14} />}
-                />
+                <div
+                  key={k}
+                  className="group relative overflow-hidden rounded-[var(--tt-radius-lg)] border border-[var(--tt-border)] bg-[var(--tt-panel)] p-3 transition-colors hover:border-[var(--tt-border-strong)]"
+                >
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-x-0 -top-px h-px"
+                    style={{ background: `linear-gradient(90deg, transparent, ${meta.hex}66, transparent)` }}
+                  />
+                  <div className="flex items-center justify-between">
+                    <div
+                      className="h-7 w-7 grid place-items-center rounded-md"
+                      style={{ backgroundColor: `${meta.hex}14`, color: meta.hex }}
+                    >
+                      <Icon size={14} />
+                    </div>
+                    <span className="tabular text-[13px] font-semibold text-[var(--tt-fg)]">{count}</span>
+                  </div>
+                  <div className="mt-2 text-[11px] uppercase tracking-[0.16em] text-[var(--tt-fg-muted)]">
+                    {meta.label}
+                  </div>
+                </div>
               );
             })}
           </div>
-        </section>
+        </Section>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8 items-start">
-         <section className="xl:col-span-2 bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 overflow-hidden">
-            <div className="p-6 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center text-white">
-               <h2 className="text-lg font-bold flex items-center gap-2">
-                  <Activity size={18} className="text-blue-500" />
-                  Recent Activity
-               </h2>
-               <span className="text-[10px] font-mono text-slate-500 bg-slate-950 px-2 py-1 rounded border border-slate-800 text-slate-100">
-                  AUTO-SYNC ENABLED
-               </span>
+      {/* Activity + sidebars */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
+        {/* Recent activity */}
+        <Card padding="none" className="xl:col-span-2 overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-[var(--tt-border)]">
+            <div className="flex items-center gap-2">
+              <Activity size={14} className="text-[var(--tt-brand)]" />
+              <CardTitle className="!text-[13px]">Recent activity</CardTitle>
             </div>
-            
-            {loading ? (
-               <div className="p-24 text-center text-slate-500 flex flex-col items-center gap-4">
-                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
-                  <span className="font-mono text-xs uppercase tracking-widest text-slate-100">Parsing Log Streams...</span>
-               </div>
-            ) : sessions.length === 0 ? (
-               <div className="p-24 text-center text-slate-400 flex flex-col items-center gap-4">
-                  <Terminal size={48} className="text-slate-600 mb-2" />
-                  <h3 className="text-xl font-bold text-slate-300">No Agent Data Found</h3>
-                  <p className="text-sm max-w-md mx-auto text-slate-500">TokenTelemetry scans your local directories for agent activity. Start using your coding agents (Claude Code, Cursor, Copilot, etc.) to see telemetry data appear here.</p>
-               </div>
+            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-[var(--tt-fg-dim)]">
+              <Radio size={10} className="text-emerald-400" />
+              auto-sync 15s
+            </div>
+          </div>
+
+          {loading ? (
+            <ActivityLoading />
+          ) : sessions.length === 0 ? (
+            <EmptyState
+              icon={<Terminal size={20} />}
+              title="No agent data yet"
+              description="TokenTelemetry watches local agent runtimes for activity. Run Claude Code, Cursor, Copilot, or another supported agent to populate this feed."
+            />
+          ) : (
+            <div className="max-h-[560px] overflow-y-auto">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH className="pl-5">Agent</TH>
+                    <TH>Project</TH>
+                    <TH>Context</TH>
+                    <TH className="text-right pr-5">Time</TH>
+                  </TR>
+                </THead>
+                <TBody>
+                  {sessions.slice(0, 50).map((s, i) => (
+                    <TR key={`${s.agent}-${s.id}-${i}`} interactive>
+                      <TD className="pl-5">
+                        <Link href={`/sessions/${s.id}?agent=${s.agent}`} className="block">
+                          <AgentBadge agent={s.agent} />
+                        </Link>
+                      </TD>
+                      <TD className="font-mono text-[12px] text-[var(--tt-fg-muted)] max-w-[160px] truncate" title={s.project}>
+                        <Link href={`/sessions/${s.id}?agent=${s.agent}`} className="block truncate">
+                          {s.project.split("/").pop()}
+                        </Link>
+                      </TD>
+                      <TD className="text-[var(--tt-fg)] max-w-[480px] truncate">
+                        <Link href={`/sessions/${s.id}?agent=${s.agent}`} className="block truncate">
+                          {s.display || s.text || (
+                            <span className="italic text-[var(--tt-fg-faint)]">No message content</span>
+                          )}
+                        </Link>
+                      </TD>
+                      <TD className="text-right pr-5 tabular text-[11px] text-[var(--tt-fg-muted)] group-hover:text-[var(--tt-brand)] transition-colors">
+                        <Link href={`/sessions/${s.id}?agent=${s.agent}`} className="block">
+                          <div>{format(new Date(s.timestamp), "HH:mm:ss")}</div>
+                          <div className="text-[10px] text-[var(--tt-fg-faint)] uppercase tracking-wider">
+                            {format(new Date(s.timestamp), "MMM d")}
+                          </div>
+                        </Link>
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
+            </div>
+          )}
+        </Card>
+
+        {/* Right column */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <Activity size={14} className="text-[var(--tt-brand)]" />
+                Agent distribution
+              </CardTitle>
+              <CardEyebrow>{sessions.length} sessions</CardEyebrow>
+            </CardHeader>
+            {availableAgents.length === 0 ? (
+              <div className="text-[12px] text-[var(--tt-fg-dim)] py-6 text-center">
+                No agents detected.
+              </div>
             ) : (
-               <div className="overflow-x-auto">
-                  <table className="w-full text-left">
-                  <thead>
-                     <tr className="text-slate-500 text-[10px] border-b border-slate-800 bg-slate-900/30 uppercase tracking-[0.15em] font-black">
-                        <th className="px-6 py-4">Agent</th>
-                        <th className="px-6 py-4">Project</th>
-                        <th className="px-6 py-4 text-slate-100">Context</th>
-                        <th className="px-6 py-4 text-right">Time</th>
-                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-                     {sessions.slice(0, 50).map((session, idx) => (
-                        <tr key={`${session.agent}-${session.id}-${idx}`} className="hover:bg-slate-800/30 transition-colors cursor-pointer group">
-                        <td className="px-6 py-4">
-                           <Link href={`/sessions/${session.id}?agent=${session.agent}`} className="block">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter border shadow-sm ${
-                                 session.agent === 'claude' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 
-                                 session.agent === 'codex' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                                 session.agent === 'gemini' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
-                                 session.agent === 'antigravity' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                 session.agent === 'qwen' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                                 session.agent === 'vibe' ? 'bg-pink-500/10 text-pink-400 border-pink-500/20' :
-                                 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
-                              }`}>
-                                 {session.agent}
-                              </span>
-                           </Link>
-                        </td>
-                        <td className="px-6 py-4 text-xs font-mono text-slate-400 truncate max-w-[140px]" title={session.project}>
-                           <Link href={`/sessions/${session.id}?agent=${session.agent}`} className="block">
-                              {session.project.split('/').pop()}
-                           </Link>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-300 font-medium truncate max-w-sm">
-                           <Link href={`/sessions/${session.id}?agent=${session.agent}`} className="block">
-                              {session.display || session.text || <span className="italic text-slate-600 font-normal">No message content</span>}
-                           </Link>
-                        </td>
-                        <td className="px-6 py-4 text-[10px] text-slate-500 group-hover:text-blue-400 transition-colors text-right font-mono tabular-nums leading-tight">
-                           <Link href={`/sessions/${session.id}?agent=${session.agent}`} className="block">
-                              {format(new Date(session.timestamp), 'HH:mm:ss')}
-                              <div className="text-[8px] opacity-50 uppercase">{format(new Date(session.timestamp), 'MMM d')}</div>
-                           </Link>
-                        </td>
-                        </tr>
-                     ))}
-                  </tbody>
-                  </table>
-               </div>
-            )}
-         </section>
-
-         {/* Sidebar Widgets */}
-         <div className="space-y-6">
-            <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-6 rounded-2xl shadow-xl border border-blue-500/30 text-white group hover:scale-[1.02] transition-transform cursor-pointer relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
-                  <Activity size={120} strokeWidth={4} />
-               </div>
-               <h3 className="text-lg font-black tracking-tight mb-2 flex items-center gap-2">
-                  EXPLORE PROJECTS
-                  <ArrowRight size={18} />
-               </h3>
-               <p className="text-blue-100 text-sm mb-6 leading-relaxed font-medium">View detailed activity traces and tool logs for all your workspaces.</p>
-               <Link href="/projects" className="bg-white/10 hover:bg-white/20 border border-white/20 py-2 px-4 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors inline-block backdrop-blur-sm text-slate-100">
-                  Open Projects Gallery
-               </Link>
-            </div>
-
-            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-6">Agent Distribution</h3>
-               <div className="space-y-5">
-                  {availableAgents.map((agent: any) => {
-                     const count = sessions.filter(s => s.agent === agent).length;
-                     if (count === 0) return null;
-                     const percent = (count / sessions.length) * 100;
-                     const colors: any = {
-                        claude: "bg-orange-500", codex: "bg-purple-500", gemini: "bg-cyan-500",
-                        antigravity: "bg-emerald-500", qwen: "bg-blue-500", vibe: "bg-pink-500", copilot: "bg-indigo-500", opencode: "bg-amber-500"
-                     };
-                     return (
-                        <div key={agent} className="space-y-2">
-                           <div className="flex justify-between text-[10px] font-bold uppercase">
-                              <span className="text-slate-400">{agent}</span>
-                              <span className="text-slate-500">{count} Sess</span>
-                           </div>
-                           <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800/50">
-                              <div className={`h-full ${colors[agent] || 'bg-slate-700'}`} style={{ width: `${percent}%` }}></div>
-                           </div>
+              <div className="space-y-4">
+                {availableAgents
+                  .map((k) => ({ k, count: sessions.filter((s) => s.agent === k).length }))
+                  .filter((r) => r.count > 0)
+                  .sort((a, b) => b.count - a.count)
+                  .map(({ k, count }) => {
+                    const meta = getAgent(k);
+                    const pct = sessions.length ? (count / sessions.length) * 100 : 0;
+                    return (
+                      <div key={k} className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="flex items-center gap-2 text-[var(--tt-fg-muted)]">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: meta.hex }} />
+                            {meta.label}
+                          </span>
+                          <span className="tabular text-[var(--tt-fg-dim)]">
+                            {count} <span className="text-[var(--tt-fg-faint)]">·</span> {pct.toFixed(0)}%
+                          </span>
                         </div>
-                     );
-                  })}
-               </div>
-               <Link href="/analytics" className="w-full text-center block mt-8 text-[10px] font-black uppercase text-blue-400 hover:text-blue-300 transition-colors tracking-widest border-t border-slate-800 pt-4">
-                  VIEW FULL ANALYTICS
-               </Link>
-            </div>
-
-            {modelRows.length > 0 && (
-            <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-               <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 flex items-center gap-2">
-                  <Cpu size={12} className="text-emerald-400" /> Model Distribution
-               </h3>
-               <p className="text-[9px] font-mono text-slate-600 mb-5">{modelRows.length} distinct models observed</p>
-               <div className="space-y-4 max-h-96 overflow-y-auto pr-1">
-                  {modelRows.map((m) => {
-                     const percent = (m.session_count / totalModelSessions) * 100;
-                     const hex = AGENT_HEX[m.agent] || "#64748b";
-                     return (
-                        <div key={m.name} className="space-y-1.5">
-                           <div className="flex justify-between items-center text-[10px] gap-2">
-                              <span className="font-mono text-slate-300 truncate" title={m.name}>{m.name}</span>
-                              <span className="font-mono text-slate-500 tabular-nums whitespace-nowrap">{m.session_count}</span>
-                           </div>
-                           <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-800/50">
-                              <div className="h-full transition-all" style={{ width: `${percent}%`, backgroundColor: hex }}></div>
-                           </div>
-                           <div className="flex justify-between text-[8px] font-mono text-slate-600">
-                              <span className="uppercase" style={{ color: hex }}>{m.agent}</span>
-                              <span>{(m.total / 1000).toFixed(0)}k tok</span>
-                           </div>
+                        <div className="h-1 rounded-full tt-tint-1 overflow-hidden">
+                          <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, backgroundColor: meta.hex }} />
                         </div>
-                     );
+                      </div>
+                    );
                   })}
-               </div>
-            </div>
+              </div>
             )}
-         </div>
+            <Link
+              href="/analytics"
+              className="mt-5 pt-4 border-t border-[var(--tt-border)] flex items-center justify-between text-[11px] text-[var(--tt-fg-muted)] hover:text-[var(--tt-brand)] transition-colors"
+            >
+              <span className="uppercase tracking-[0.18em]">View analytics</span>
+              <ArrowUpRight size={12} />
+            </Link>
+          </Card>
+
+          {modelRows.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  <Cpu size={14} className="text-emerald-400" />
+                  Model distribution
+                </CardTitle>
+                <CardEyebrow>{modelRows.length} models</CardEyebrow>
+              </CardHeader>
+              <div className="space-y-3.5 max-h-[420px] overflow-y-auto pr-1 -mr-1">
+                {modelRows.map((m) => {
+                  const meta = getAgent(m.agent);
+                  const pct = (m.session_count / totalModelSessions) * 100;
+                  return (
+                    <div key={m.name} className="space-y-1">
+                      <div className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="font-mono text-[var(--tt-fg)] truncate" title={m.name}>{m.name}</span>
+                        <span className="tabular text-[var(--tt-fg-dim)] whitespace-nowrap">{m.session_count}</span>
+                      </div>
+                      <div className="h-[3px] rounded-full tt-tint-1 overflow-hidden">
+                        <div className="h-full transition-[width] duration-500" style={{ width: `${pct}%`, backgroundColor: meta.hex }} />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-[var(--tt-fg-faint)]">
+                        <span className="uppercase tracking-[0.16em]" style={{ color: meta.hex }}>{m.agent}</span>
+                        <span className="tabular">{(m.total / 1000).toFixed(0)}k tok</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function StatCard({ title, value, icon, color, subValue }: { title: string; value: string | number; icon: React.ReactNode; color: string; subValue?: string }) {
-  const colorMap: Record<string, string> = {
-    blue: "border-blue-500/20 bg-blue-500/5",
-    emerald: "border-emerald-500/20 bg-emerald-500/5",
-    cyan: "border-cyan-500/20 bg-cyan-500/5",
-    amber: "border-amber-500/20 bg-amber-500/5"
-  };
-
+function ActivityLoading() {
   return (
-    <div className={`p-6 rounded-2xl border shadow-xl flex items-center justify-between transition-all hover:border-slate-600 ${colorMap[color] || 'border-slate-800 bg-slate-900'}`}>
-      <div>
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">{title}</p>
-        <p className="text-3xl font-black text-white tracking-tighter">{value}</p>
-        {subValue && <p className="text-[9px] font-mono text-slate-500 mt-1.5 italic">{subValue}</p>}
-      </div>
-      <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800 shadow-inner">{icon}</div>
+    <div className="p-5 space-y-3">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} className="grid grid-cols-[80px_140px_1fr_60px] gap-4 items-center">
+          <Skeleton className="h-5 w-16" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-12" />
+        </div>
+      ))}
     </div>
   );
 }
 
-function AgentStat({ label, count, color, icon }: { label: string; count: number; color: string; icon: React.ReactNode }) {
-   const colorMap: Record<string, string> = {
-      orange: "text-orange-400 bg-orange-400/5 border-orange-400/10",
-      purple: "text-purple-400 bg-purple-400/5 border-purple-400/10",
-      cyan: "text-cyan-400 bg-cyan-400/5 border-cyan-400/10",
-      emerald: "text-emerald-400 bg-emerald-400/5 border-emerald-400/10",
-      blue: "text-blue-400 bg-blue-400/5 border-blue-400/10",
-      pink: "text-pink-400 bg-pink-400/5 border-pink-400/10",
-      indigo: "text-indigo-400 bg-indigo-400/5 border-indigo-400/10"
-   };
+function formatTokens(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return n.toLocaleString();
+}
 
-   return (
-      <div className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all hover:bg-slate-800/20 ${colorMap[color]}`}>
-         <div className={`p-2 rounded-lg bg-slate-950/50 mb-2 border border-slate-800/50 text-slate-100`}>{icon}</div>
-         <span className="text-[9px] font-black uppercase tracking-wider mb-1">{label}</span>
-         <span className="font-mono text-sm font-bold text-white leading-none">{count}</span>
-      </div>
-   );
+function formatCost(n: number) {
+  if (n === 0) return "$0.00";
+  if (n < 0.01) return "<$0.01";
+  return `$${n.toFixed(2)}`;
 }

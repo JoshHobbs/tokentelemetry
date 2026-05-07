@@ -1,48 +1,59 @@
 import { AGENTS } from "@/data/agents";
-import { Terminal } from "lucide-react";
 
 export default function AgentsGrid() {
   return (
-    <section className="max-w-7xl mx-auto px-6 py-24">
+    <section id="agents" className="max-w-[1320px] mx-auto px-5 sm:px-8 py-24">
       <div className="text-center mb-12">
-        <p className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.3em] mb-3">Supported</p>
-        <h2 className="text-4xl md:text-5xl font-black text-white tracking-tighter mb-4">
-          Nine agents. Zero config.
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-dim)] mb-3">Supported</p>
+        <h2 className="text-[34px] sm:text-[44px] leading-[1.05] tracking-[-0.02em] font-semibold text-[var(--tt-fg)] mb-4">
+          Nine agents. <span className="text-[var(--tt-brand)]">Zero config.</span>
         </h2>
-        <p className="text-slate-400 max-w-2xl mx-auto">
-          TokenTelemetry reads logs your agents already write. No proxies, no wrappers, no telemetry endpoints to register.
+        <p className="text-[15px] text-[var(--tt-fg-muted)] max-w-2xl mx-auto leading-relaxed">
+          TokenTelemetry reads logs your agents already write. No proxies, no wrappers, no SDK to register.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {AGENTS.map((a) => (
           <div
             key={a.name}
-            className="group bg-slate-900/40 border border-slate-800 rounded-2xl p-5 hover:border-slate-600 hover:bg-slate-900/80 transition-all"
+            className="group relative overflow-hidden rounded-[var(--tt-radius-lg)] border border-[var(--tt-border)] bg-[var(--tt-panel)] p-5 transition-colors hover:border-[var(--tt-border-strong)]"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <div className={`text-base font-black tracking-tight ${a.accent}`}>{a.name}</div>
-                <div className="text-[10px] font-mono text-slate-600 uppercase tracking-widest mt-0.5">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 -top-px h-px"
+              style={{ background: `linear-gradient(90deg, transparent, ${a.hex}55, transparent)` }}
+            />
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--tt-fg)] truncate">
+                  {a.name}
+                </div>
+                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--tt-fg-dim)] mt-0.5">
                   {a.vendor}
                 </div>
               </div>
-              <Terminal size={16} className="text-slate-700 group-hover:text-slate-400 transition-colors" />
+              <span
+                className="h-7 w-7 grid place-items-center rounded-md border shrink-0"
+                style={{ backgroundColor: `${a.hex}14`, borderColor: `${a.hex}33`, color: a.hex }}
+              >
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: a.hex, boxShadow: `0 0 8px ${a.hex}80` }} />
+              </span>
             </div>
 
-            <div className="flex flex-wrap gap-1.5 mb-4">
+            <div className="flex flex-wrap gap-1.5 mb-3">
               {a.captures.map((c) => (
                 <span
                   key={c}
-                  className="text-[9px] font-bold text-slate-400 bg-slate-950 border border-slate-800 px-2 py-0.5 rounded uppercase tracking-widest"
+                  className="text-[10px] font-medium text-[var(--tt-fg-muted)] tt-tint-1 border border-[var(--tt-border)] px-1.5 py-0.5 rounded uppercase tracking-tight"
                 >
                   {c}
                 </span>
               ))}
             </div>
 
-            <div className="text-[10px] font-mono text-slate-600 group-hover:text-slate-500 transition-colors truncate">
-              reads: {a.logPath}
+            <div className="text-[10.5px] font-mono text-[var(--tt-fg-dim)] truncate" title={a.logPath}>
+              <span className="text-[var(--tt-fg-faint)]">reads:</span> {a.logPath}
             </div>
           </div>
         ))}

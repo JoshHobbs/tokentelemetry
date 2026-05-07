@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Folder, Terminal, Database, Sparkles, ArrowLeft, Cpu, Users, ClipboardList, Zap, GitBranch, Orbit, ArrowRight, Search, MousePointer2, Code2 } from "lucide-react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import {
+  Folder, Search, ArrowRight, Wrench, Users, ClipboardList,
+  LayoutGrid, List as ListIcon, ArrowUpDown, FolderOpen,
+} from "lucide-react";
+
+import { useResource } from "@/lib/api";
+import { getAgent } from "@/lib/agents";
+import { cn } from "@/lib/cn";
+import {
+  PageHeader, Section, Card, Badge, AgentBadge, Button, EmptyState, Skeleton,
+  Table, THead, TBody, TR, TH, TD,
+} from "@/components/ui";
 
 interface Project {
   name: string;
@@ -16,168 +27,298 @@ interface Project {
   tokens?: { input: number; output: number; cached: number; total: number; cost: number };
 }
 
-function formatCost(usd: number): string {
-  if (!usd) return "$0.00";
-  if (usd < 0.01) return `<$0.01`;
-  return `$${usd.toFixed(2)}`;
+type ViewMode = "grid" | "list";
+type SortKey = "sessions" | "tokens" | "cost" | "name";
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "sessions", label: "Sessions" },
+  { key: "tokens",   label: "Tokens"   },
+  { key: "cost",     label: "Cost"     },
+  { key: "name",     label: "Name"     },
+];
+
+export default function ProjectsPage() {
+  const { data: projects = [], loading } = useResource<Project[]>("/projects", { initial: [] });
+
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<ViewMode>("grid");
+  const [sortKey, setSortKey] = useState<SortKey>("sessions");
+  const [sortDesc, setSortDesc] = useState(true);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    const list = !q ? projects : projects.filter((p) =>
+      p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+    );
+    const cmp = (a: Project, b: Project) => {
+      let av: number | string = 0, bv: number | string = 0;
+      switch (sortKey) {
+        case "sessions": av = a.session_count; bv = b.session_count; break;
+        case "tokens":   av = a.tokens?.total ?? 0; bv = b.tokens?.total ?? 0; break;
+        case "cost":     av = a.tokens?.cost ?? 0;  bv = b.tokens?.cost ?? 0;  break;
+        case "name":     av = a.name.toLowerCase(); bv = b.name.toLowerCase(); break;
+      }
+      if (av < bv) return sortDesc ? 1 : -1;
+      if (av > bv) return sortDesc ? -1 : 1;
+      return 0;
+    };
+    return [...list].sort(cmp);
+  }, [projects, search, sortKey, sortDesc]);
+
+  return (
+    <div className="px-8 py-8 max-w-[1600px] mx-auto space-y-8 pb-20">
+      <PageHeader
+        eyebrow="Workspaces"
+        title="Projects"
+        description="Activity grouped by workspace path. Each card opens a project workspace with sessions, plans, and config."
+        icon={<Folder size={20} strokeWidth={2.25} />}
+        actions={
+          <Badge variant="neutral" size="sm" className="h-9">
+            {projects.length} {projects.length === 1 ? "project" : "projects"}
+          </Badge>
+        }
+      />
+
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[260px]">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tt-fg-dim)] pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name or path…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full h-9 pl-9 pr-3 rounded-[var(--tt-radius)] bg-[var(--tt-panel)] border border-[var(--tt-border)] text-[13px] text-[var(--tt-fg)] placeholder:text-[var(--tt-fg-faint)] hover:border-[var(--tt-border-strong)] focus:border-[color:var(--tt-brand)]/40 focus:outline-none focus:ring-1 focus:ring-[color:var(--tt-brand)]/30 transition-colors"
+          />
+        </div>
+
+        {/* Sort */}
+        <div className="flex items-center rounded-[var(--tt-radius)] border border-[var(--tt-border)] bg-[var(--tt-panel)] overflow-hidden">
+          <span className="pl-3 pr-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-dim)]">Sort</span>
+          {SORTS.map((s) => (
+            <button
+              key={s.key}
+              onClick={() => (sortKey === s.key ? setSortDesc(!sortDesc) : setSortKey(s.key))}
+              className={cn(
+                "h-9 px-2.5 text-[12px] font-medium transition-colors flex items-center gap-1",
+                sortKey === s.key ? "text-[var(--tt-fg)] tt-tint-1" : "text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)]",
+              )}
+            >
+              {s.label}
+              {sortKey === s.key && (
+                <ArrowUpDown size={11} className={cn("transition-transform", sortDesc && "rotate-180")} />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* View toggle */}
+        <div className="flex items-center rounded-[var(--tt-radius)] border border-[var(--tt-border)] bg-[var(--tt-panel)] overflow-hidden">
+          {[
+            { v: "grid", icon: LayoutGrid, label: "Grid" },
+            { v: "list", icon: ListIcon,   label: "List" },
+          ].map(({ v, icon: I, label }) => (
+            <button
+              key={v}
+              onClick={() => setView(v as ViewMode)}
+              aria-label={label}
+              className={cn(
+                "h-9 w-9 grid place-items-center transition-colors",
+                view === v ? "text-[var(--tt-brand)] tt-tint-1" : "text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)]",
+              )}
+            >
+              <I size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Results */}
+      {loading ? (
+        <ProjectsLoading view={view} />
+      ) : filtered.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={<Search size={20} />}
+            title={search ? `No projects match "${search}"` : "No projects detected yet"}
+            description={
+              search
+                ? "Try a shorter query or clear the search to see all workspaces."
+                : "Once your agents log activity in any workspace, projects will appear here."
+            }
+          />
+        </Card>
+      ) : view === "grid" ? (
+        <Section>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map((p) => <ProjectCard key={p.path} project={p} />)}
+          </div>
+        </Section>
+      ) : (
+        <Card padding="none">
+          <Table>
+            <THead>
+              <TR>
+                <TH className="pl-5">Project</TH>
+                <TH>Agents</TH>
+                <TH className="text-right">Sessions</TH>
+                <TH className="text-right">Subagents</TH>
+                <TH className="text-right">Plans</TH>
+                <TH className="text-right">Tokens</TH>
+                <TH className="text-right pr-5">Cost</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {filtered.map((p) => (
+                <TR key={p.path} interactive>
+                  <TD className="pl-5">
+                    <Link href={`/projects/${encodeURIComponent(p.path)}`} className="block min-w-0">
+                      <div className="font-semibold text-[var(--tt-fg)] truncate">{p.name}</div>
+                      <div className="font-mono text-[11px] text-[var(--tt-fg-dim)] truncate" title={p.path}>{p.path}</div>
+                    </Link>
+                  </TD>
+                  <TD>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {p.agents.slice(0, 4).map((a) => <AgentBadge key={a} agent={a} withLabel={false} />)}
+                      {p.agents.length > 4 && (
+                        <span className="text-[10px] text-[var(--tt-fg-dim)]">+{p.agents.length - 4}</span>
+                      )}
+                    </div>
+                  </TD>
+                  <TD className="text-right tabular text-[var(--tt-fg)] font-semibold">{p.session_count}</TD>
+                  <TD className="text-right tabular text-purple-300/90">
+                    {(p.configured_subagent_count ?? 0) + (p.subagent_count ?? 0)}
+                  </TD>
+                  <TD className="text-right tabular text-emerald-300/90">{p.plan_count || 0}</TD>
+                  <TD className="text-right tabular text-[var(--tt-fg-muted)]">{formatTokens(p.tokens?.total ?? 0)}</TD>
+                  <TD className="text-right pr-5 tabular text-amber-300 font-semibold">{formatCost(p.tokens?.cost ?? 0)}</TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        </Card>
+      )}
+    </div>
+  );
 }
 
-function formatTokens(n: number): string {
+/* ──────────────────────────────────────────────────────────────────────────
+   Cards
+   ────────────────────────────────────────────────────────────────────────── */
+
+function ProjectCard({ project }: { project: Project }) {
+  const subs = (project.configured_subagent_count ?? 0) + (project.subagent_count ?? 0);
+  const tokens = project.tokens?.total ?? 0;
+  const cost = project.tokens?.cost ?? 0;
+
+  return (
+    <Link href={`/projects/${encodeURIComponent(project.path)}`} className="block group">
+      <Card interactive className="!p-0 h-full flex flex-col overflow-hidden">
+        <div className="p-5 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="h-9 w-9 grid place-items-center rounded-[var(--tt-radius)] bg-[var(--tt-brand-glow)] text-[var(--tt-brand)] border border-[color:var(--tt-brand)]/20 shrink-0">
+              <Folder size={16} strokeWidth={2.25} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[14px] font-semibold tracking-[-0.01em] text-[var(--tt-fg)] truncate group-hover:text-[var(--tt-brand)] transition-colors" title={project.name}>
+                {project.name}
+              </div>
+              <div className="font-mono text-[10px] text-[var(--tt-fg-dim)] truncate mt-0.5" title={project.path}>
+                {project.path}
+              </div>
+            </div>
+          </div>
+          <ArrowRight size={14} className="text-[var(--tt-fg-dim)] group-hover:text-[var(--tt-brand)] group-hover:translate-x-0.5 transition-all shrink-0 mt-1" />
+        </div>
+
+        <div className="px-5 pb-3 flex items-center gap-1.5 flex-wrap">
+          {project.agents.slice(0, 5).map((a) => {
+            const meta = getAgent(a);
+            const Icon = meta.icon;
+            return (
+              <span
+                key={a}
+                title={meta.label}
+                className="h-6 w-6 grid place-items-center rounded-md border"
+                style={{ backgroundColor: `${meta.hex}10`, borderColor: `${meta.hex}33`, color: meta.hex }}
+              >
+                <Icon size={12} />
+              </span>
+            );
+          })}
+          {project.agents.length > 5 && (
+            <span className="text-[10px] text-[var(--tt-fg-dim)] ml-1">+{project.agents.length - 5}</span>
+          )}
+        </div>
+
+        {project.mcp_tools.length > 0 && (
+          <div className="px-5 pb-4 flex items-center gap-1.5 flex-wrap">
+            <Wrench size={11} className="text-[var(--tt-fg-faint)]" />
+            {project.mcp_tools.slice(0, 4).map((t) => (
+              <Badge key={t} variant="outline" size="xs" className="font-mono normal-case">{t}</Badge>
+            ))}
+            {project.mcp_tools.length > 4 && (
+              <span className="text-[10px] text-[var(--tt-fg-dim)]">+{project.mcp_tools.length - 4}</span>
+            )}
+          </div>
+        )}
+
+        <div className="mt-auto grid grid-cols-4 gap-px bg-[var(--tt-border)] border-t border-[var(--tt-border)]">
+          <Stat label="Sessions" value={project.session_count} />
+          <Stat label="Subs"     value={subs}      tone="purple" />
+          <Stat label="Plans"    value={project.plan_count || 0} tone="emerald" />
+          <Stat label="Cost"     value={formatCost(cost)} tone="amber"
+                hint={tokens ? formatTokens(tokens) : undefined} />
+        </div>
+      </Card>
+    </Link>
+  );
+}
+
+function Stat({
+  label, value, tone = "default", hint,
+}: { label: string; value: React.ReactNode; tone?: "default" | "purple" | "emerald" | "amber"; hint?: string }) {
+  const TONE: Record<string, string> = {
+    default: "text-[var(--tt-fg)]",
+    purple:  "text-purple-300",
+    emerald: "text-emerald-300",
+    amber:   "text-amber-300",
+  };
+  return (
+    <div className="bg-[var(--tt-panel)] py-3 px-2 text-center">
+      <div className={cn("tabular text-[15px] font-semibold leading-none", TONE[tone])}>{value}</div>
+      <div className="mt-1.5 text-[9px] uppercase tracking-[0.16em] text-[var(--tt-fg-dim)]">
+        {hint ? `${hint} · ${label}` : label}
+      </div>
+    </div>
+  );
+}
+
+function ProjectsLoading({ view }: { view: ViewMode }) {
+  if (view === "list") {
+    return (
+      <Card padding="md">
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-56 w-full" />)}
+    </div>
+  );
+}
+
+function formatCost(usd: number) {
+  if (!usd) return "$0.00";
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+function formatTokens(n: number) {
   if (!n) return "0";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
-}
-
-const AGENT_ICONS: Record<string, any> = {
-  claude: { icon: Terminal, color: "text-orange-400" },
-  codex: { icon: Database, color: "text-purple-400" },
-  gemini: { icon: Sparkles, color: "text-cyan-400" },
-  antigravity: { icon: Orbit, color: "text-emerald-400" },
-  qwen: { icon: Cpu, color: "text-blue-400" },
-  vibe: { icon: Zap, color: "text-pink-400" },
-  cursor: { icon: MousePointer2, color: "text-blue-400" },
-  copilot: { icon: GitBranch, color: "text-indigo-400" },
-  opencode: { icon: Code2, color: "text-amber-400" }
-};
-
-export default function ProjectsPage() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState("");
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/projects")
-      .then((res) => res.json())
-      .then((data) => {
-        setProjects(data.sort((a: Project, b: Project) => b.session_count - a.session_count));
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch projects:", err);
-        setLoading(false);
-      });
-  }, []);
-
-  const filteredProjects = useMemo(() => {
-    return projects.filter(project => 
-      project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      project.path.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [projects, searchTerm]);
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto space-y-10 pb-20">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div>
-          <Link href="/" className="text-blue-400 flex items-center gap-2 hover:underline mb-4 text-sm font-medium">
-            <ArrowLeft size={16} /> Back to Dashboard
-          </Link>
-          <h1 className="text-4xl font-black text-white tracking-tight flex items-center gap-3">
-            <Folder className="text-blue-500" size={32} />
-            Projects
-          </h1>
-          <p className="text-slate-400 mt-2 font-medium">Activity grouped by workspace.</p>
-        </div>
-
-        <div className="relative w-full md:w-80">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-          <input 
-            type="text"
-            placeholder="Search projects..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-800 rounded-2xl py-3 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-slate-600 shadow-xl"
-          />
-        </div>
-      </header>
-
-      {loading ? (
-        <div className="text-center p-32 text-slate-500 flex flex-col items-center gap-4 text-slate-100">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mx-auto"></div>
-          <span className="font-mono text-xs uppercase tracking-widest">Mapping Workspace Traces...</span>
-        </div>
-      ) : filteredProjects.length === 0 ? (
-        <div className="text-center p-32 bg-slate-900 rounded-3xl border border-dashed border-slate-800 text-slate-500">
-           <Search size={48} className="mx-auto mb-4 opacity-20" />
-           <p className="font-medium">No projects found matching "{searchTerm}"</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-          {filteredProjects.map((project) => (
-            <div key={project.path} className="bg-slate-900 p-8 rounded-3xl shadow-2xl border border-slate-800 hover:border-slate-600 transition-all group flex flex-col h-full relative overflow-hidden min-w-0">
-              <div className="flex items-start justify-between mb-6">
-                <div className="bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20">
-                  <Folder className="text-blue-400" size={28} />
-                </div>
-                <div className="flex gap-2 bg-slate-950/50 p-2 rounded-xl border border-slate-800">
-                  {project.agents.map(agentKey => {
-                    const config = AGENT_ICONS[agentKey];
-                    if (!config) return null;
-                    const Icon = config.icon;
-                    return <Icon key={agentKey} size={14} className={config.color} />;
-                  })}
-                </div>
-              </div>
-              
-              <h2 className="text-xl font-bold text-white mb-2 truncate group-hover:text-blue-400 transition-colors" title={project.name}>
-                {project.name}
-              </h2>
-              
-              <div className="flex-1 min-w-0 mb-6">
-                <p className="text-[10px] text-slate-500 font-mono truncate bg-slate-950/50 px-2 py-1 rounded inline-block max-w-full" title={project.path}>
-                  {project.path}
-                </p>
-              </div>
-              
-              {project.mcp_tools.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-8">
-                  {project.mcp_tools.slice(0, 5).map(tool => (
-                    <span key={tool} className="text-[9px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 px-2 py-1 rounded-lg border border-slate-700">
-                      {tool}
-                    </span>
-                  ))}
-                  {project.mcp_tools.length > 5 && (
-                    <span className="text-[9px] text-slate-600 font-bold ml-1 flex items-center">+{project.mcp_tools.length - 5}</span>
-                  )}
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 mt-auto pt-6 border-t border-slate-800/50">
-                <div className="flex flex-wrap gap-x-4 gap-y-2 min-w-0">
-                  <div className="flex flex-col items-center gap-1" title="Sessions">
-                    <span className="text-lg font-black text-white leading-none">{project.session_count}</span>
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Sess</span>
-                  </div>
-                  <div className="flex flex-col items-center gap-1" title="Subagents">
-                    <span className="text-lg font-black text-purple-400 leading-none">{(project.configured_subagent_count || 0) + (project.subagent_count || 0)}</span>
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Subs</span>
-                  </div>
-                  {project.plan_count > 0 && (
-                     <div className="flex flex-col items-center gap-1" title="Plans">
-                        <span className="text-lg font-black text-emerald-400 leading-none">{project.plan_count}</span>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Plans</span>
-                     </div>
-                  )}
-                  {(project.tokens?.total || 0) > 0 && (
-                     <div className="flex flex-col items-center gap-1" title={`${(project.tokens?.total || 0).toLocaleString()} tokens`}>
-                        <span className="text-lg font-black text-amber-400 leading-none tabular-nums">{formatCost(project.tokens?.cost || 0)}</span>
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Cost</span>
-                     </div>
-                  )}
-                </div>
-
-                <Link
-                   href={`/projects/${encodeURIComponent(project.path)}`}
-                   className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg inline-flex items-center gap-2 group/btn"
-                >
-                   Activity <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }

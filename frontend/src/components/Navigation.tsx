@@ -2,106 +2,126 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Folder, BarChart3, Activity, Orbit, ChevronLeft, PanelLeftOpen, PanelLeftClose, Server } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  LayoutDashboard, Folder, BarChart3, Activity,
+  PanelLeftOpen, PanelLeftClose,
+} from "lucide-react";
+import { useResource } from "@/lib/api";
+import { ALL_AGENT_KEYS, getAgent } from "@/lib/agents";
+import { cn } from "@/lib/cn";
+import { ThemeToggle } from "./ThemeToggle";
 
 interface NavigationProps {
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
 }
 
+const LINKS = [
+  { name: "Dashboard", href: "/",         icon: LayoutDashboard },
+  { name: "Projects",  href: "/projects", icon: Folder },
+  { name: "Analytics", href: "/analytics", icon: BarChart3 },
+];
+
 export default function Navigation({ isCollapsed, setIsCollapsed }: NavigationProps) {
   const pathname = usePathname();
-  const [availableAgents, setAvailableAgents] = useState<string[]>([]);
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/agents")
-      .then(res => res.json())
-      .then(data => setAvailableAgents(data))
-      .catch(() => {});
-  }, []);
-
-  const links = [
-    { name: "Dashboard", href: "/", icon: LayoutDashboard },
-    { name: "Projects", href: "/projects", icon: Folder },
-    { name: "Analytics", href: "/analytics", icon: BarChart3 },
-    // { name: "Local Lab", href: "/locallab", icon: Server },
-  ];
+  const { data: availableAgents = [] } = useResource<string[]>("/agents", { initial: [] });
 
   return (
-    <nav className={`${isCollapsed ? "w-20" : "w-64"} bg-slate-900 border-r border-slate-800 h-screen sticky top-0 flex flex-col p-4 transition-all duration-300 ease-in-out z-[100]`}>
-      <div className={`flex items-center ${isCollapsed ? "justify-center" : "justify-between"} mb-10 mt-2`}>
+    <nav
+      className={cn(
+        "sticky top-0 z-[100] h-screen flex flex-col p-3 transition-[width] duration-300 ease-out",
+        "bg-[var(--tt-panel)]/80 backdrop-blur-md border-r border-[var(--tt-border)]",
+        isCollapsed ? "w-[72px]" : "w-64",
+      )}
+    >
+      {/* Brand */}
+      <div className={cn("flex items-center gap-3 px-2 py-3 mb-3", isCollapsed && "justify-center px-0")}>
+        <div className="relative h-8 w-8 grid place-items-center rounded-[var(--tt-radius)] bg-gradient-to-br from-[var(--tt-brand)] to-[var(--tt-brand-deep)] shadow-[0_0_20px_-4px_var(--tt-brand-glow)]">
+          <Activity className="text-white" size={16} strokeWidth={2.5} />
+        </div>
         {!isCollapsed && (
-          <div className="flex items-center gap-3 px-2">
-            <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/20">
-              <Activity className="text-white" size={20} />
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold tracking-[-0.01em] text-[var(--tt-fg)] leading-tight">
+              TokenTelemetry
             </div>
-            <span className="font-black text-white tracking-tighter text-lg">TokenTelemetry</span>
+            <div className="text-[10px] tracking-[0.18em] uppercase text-[var(--tt-fg-dim)] leading-tight">
+              Agent observability
+            </div>
           </div>
-        )}
-        {isCollapsed && (
-           <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/20">
-              <Activity className="text-white" size={20} />
-           </div>
         )}
       </div>
 
-      <div className="space-y-2">
-        {links.map((link) => {
+      {/* Links */}
+      <div className="space-y-0.5">
+        {LINKS.map((link) => {
           const Icon = link.icon;
           const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
           return (
             <Link
               key={link.name}
               href={link.href}
-              title={isCollapsed ? link.name : ""}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all relative group ${
-                isActive 
-                  ? "bg-blue-600/10 text-blue-400 border border-blue-600/20 shadow-[0_0_15px_rgba(37,99,235,0.05)]" 
-                  : "text-slate-500 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent"
-              }`}
-            >
-              <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
-              {!isCollapsed && <span className="text-sm font-bold uppercase tracking-widest">{link.name}</span>}
-              {isCollapsed && isActive && (
-                 <div className="absolute left-0 w-1 h-6 bg-blue-500 rounded-r-full"></div>
+              title={isCollapsed ? link.name : undefined}
+              className={cn(
+                "relative flex items-center gap-3 rounded-[var(--tt-radius)] px-2.5 py-2 text-[13px] font-medium transition-colors",
+                isActive
+                  ? "tt-tint-1 text-[var(--tt-fg)]"
+                  : "text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] hover:tt-tint-1",
+                isCollapsed && "justify-center",
               )}
+            >
+              {isActive && (
+                <span
+                  aria-hidden
+                  className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-r-full bg-[var(--tt-brand)] shadow-[0_0_10px_var(--tt-brand-glow)]"
+                />
+              )}
+              <Icon size={16} strokeWidth={isActive ? 2.25 : 1.75} className={isActive ? "text-[var(--tt-brand)]" : ""} />
+              {!isCollapsed && <span>{link.name}</span>}
             </Link>
           );
         })}
       </div>
 
-      <div className="mt-auto space-y-4">
-        {/* Agent Indicators */}
-        {!isCollapsed && (
-          <div className="p-4 bg-slate-950/50 rounded-2xl border border-slate-800/50">
-            <div className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] mb-3">Connected</div>
-            <div className="space-y-2.5">
-                {availableAgents.includes("claude") && <AgentDot color="bg-orange-500" label="Claude" />}
-                {availableAgents.includes("codex") && <AgentDot color="bg-purple-500" label="Codex" />}
-                {availableAgents.includes("gemini") && <AgentDot color="bg-cyan-500" label="Gemini" />}
-                {availableAgents.includes("antigravity") && <AgentDot color="bg-emerald-500" label="Antigravity" />}
-                {availableAgents.includes("cursor") && <AgentDot color="bg-blue-500" label="Cursor" />}
+      {/* Connected agents */}
+      <div className="mt-auto space-y-3">
+        {!isCollapsed && availableAgents.length > 0 && (
+          <div className="rounded-[var(--tt-radius-lg)] border border-[var(--tt-border)] bg-[var(--tt-sunken)] p-3">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[var(--tt-fg-dim)] mb-2.5 flex items-center justify-between">
+              <span>Connected</span>
+              <span className="tabular text-[var(--tt-fg-muted)]">{availableAgents.length}</span>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              {availableAgents.map((k) => {
+                if (!ALL_AGENT_KEYS.includes(k as never)) return null;
+                const meta = getAgent(k);
+                return (
+                  <div key={k} className="flex items-center gap-2 text-[11px] text-[var(--tt-fg-muted)]">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full"
+                      style={{ backgroundColor: meta.hex, boxShadow: `0 0 8px ${meta.hex}80` }}
+                    />
+                    <span className="truncate">{meta.label}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        <button 
+        <ThemeToggle collapsed={isCollapsed} />
+
+        <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="w-full flex items-center justify-center p-3 rounded-xl bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-white transition-all border border-slate-700/50"
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "w-full flex items-center justify-center gap-2 rounded-[var(--tt-radius)] py-2 text-[var(--tt-fg-dim)] hover:text-[var(--tt-fg)] hover:tt-tint-1 transition-colors border border-transparent hover:border-[var(--tt-border)]",
+          )}
         >
-          {isCollapsed ? <PanelLeftOpen size={20} /> : <div className="flex items-center gap-2"><PanelLeftClose size={18} /><span className="text-[10px] font-black uppercase tracking-widest">Collapse</span></div>}
+          {isCollapsed
+            ? <PanelLeftOpen size={16} />
+            : (<><PanelLeftClose size={14} /><span className="text-[10px] uppercase tracking-[0.18em]">Collapse</span></>)}
         </button>
       </div>
     </nav>
-  );
-}
-
-function AgentDot({ color, label }: { color: string, label: string }) {
-  return (
-    <div className="flex items-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-tight">
-      <div className={`w-1.5 h-1.5 rounded-full ${color} shadow-[0_0_8px_rgba(255,255,255,0.1)]`}></div>
-      {label}
-    </div>
   );
 }

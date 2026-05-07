@@ -4,9 +4,10 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeft, Brain, Code, MessageSquare, Terminal, User, FileText, Activity, Zap, Info, Sparkles, GitBranch, LayoutPanelLeft, ListMusic, ChevronRight, ChevronLeft, Play, Pause, Wrench, Cpu, Folder, AlertTriangle, Hash, Clock, FileCode, Settings2, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Brain, Code, MessageSquare, Terminal, User, FileText, Activity, Zap, Info, Sparkles, GitBranch, LayoutPanelLeft, ListMusic, ChevronRight, ChevronLeft, Play, Pause, Wrench, Cpu, Folder, AlertTriangle, Hash, Clock, FileCode, Settings2, ChevronDown, ChevronUp, Copy } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
+import { AgentBadge, Badge, Button, Skeleton } from "@/components/ui";
 
 interface Artifact {
   name: string;
@@ -128,16 +129,20 @@ export default function SessionDetailPage() {
   const id = params?.id as string;
   const searchParams = useSearchParams();
   const agent = searchParams.get("agent");
-  
+  const initialTab = (() => {
+    const t = searchParams.get("tab");
+    return t === "tools" || t === "artifacts" || t === "raw" || t === "context" ? t : "context";
+  })();
+
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionInfo, setSessionInfo] = useState<Session | null>(null);
-  
+
   // Trace View States
   const [splitView, setSplitView] = useState(false);
   const [playbackIndex, setPlaybackIndex] = useState(1000);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"context" | "tools" | "artifacts" | "raw">("context");
+  const [sidebarTab, setSidebarTab] = useState<"context" | "tools" | "artifacts" | "raw">(initialTab);
   const [activeStep, setActiveStep] = useState<number | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -172,6 +177,26 @@ export default function SessionDetailPage() {
             evts = evts.filter((e: any) => {
               if (e.type === 'turn_context') return false;
               if (e.type === 'event_msg' && e.payload?.type === 'token_count') return false;
+              return true;
+            });
+          }
+          // Antigravity log-only sessions return { error: "Not found" } from the detail endpoint —
+          // surface that upstream as an empty trace so the empty-state renders instead of a broken viewer.
+          if (data && typeof data === 'object' && !Array.isArray(data) && data.error) {
+            evts = [];
+          }
+          // Strip Claude / Cursor noise events that don't render meaningful trace UI
+          if (agent === 'claude' || agent === 'cursor') {
+            const NOISE_TYPES = new Set([
+              'last-prompt', 'permission-mode', 'ai-title', 'file-history-snapshot',
+              'queue-operation', 'attachment', 'system',
+            ]);
+            evts = evts.filter((e: any) => {
+              if (NOISE_TYPES.has(e.type)) return false;
+              // Drop synthetic local-command echo pings
+              if (e.type === 'user' && e.isMeta) return false;
+              const c = e.message?.content;
+              if (e.type === 'user' && typeof c === 'string' && c.startsWith('<local-command-')) return false;
               return true;
             });
           }
@@ -393,142 +418,153 @@ export default function SessionDetailPage() {
   }, [events]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex flex-col">
-      <header className="bg-slate-900/50 border-b border-slate-800 p-6 sticky top-0 z-50 backdrop-blur-md">
-        <div className="max-w-[1600px] mx-auto flex flex-col gap-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-               <button
-                  onClick={() => router.back()}
-                  className="bg-slate-800 p-2 rounded-xl hover:bg-slate-700 transition-colors shadow-lg"
-                  title="Back"
-               >
-                  <ArrowLeft size={20} />
-               </button>
-               <div>
-                  <h1 className="text-xl font-black text-white flex items-center gap-3 tracking-tight">
-                     <Activity className="text-blue-500" size={24} />
-                     SESSION TRACE
-                  </h1>
-                  <div className="flex items-center gap-3 mt-1">
-                     <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border shadow-sm ${
-                        agent === 'claude' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 
-                        agent === 'codex' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-                        agent === 'gemini' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
-                        agent === 'cursor' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                     }`}>
-                        {agent}
-                     </span>
-                     <span className="text-[10px] font-mono text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">ID: {id.slice(0, 12)}...</span>
-                     {modelsUsed.slice(0, 3).map((m) => (
-                        <span key={m} title={m} className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 max-w-[260px] truncate">
-                           <Cpu size={10} /> {m}
-                        </span>
-                     ))}
-                     {modelsUsed.length > 3 && (
-                        <span className="text-[10px] font-mono text-slate-500">+{modelsUsed.length - 3}</span>
-                     )}
-                  </div>
-               </div>
+    <div className="min-h-screen bg-[var(--tt-canvas)] text-[var(--tt-fg)] font-sans flex flex-col">
+      <header className="bg-[var(--tt-canvas)]/85 border-b border-[var(--tt-border)] px-6 py-4 sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-[var(--tt-canvas)]/65">
+        <div className="max-w-[1600px] mx-auto flex flex-col gap-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3 min-w-0">
+              <button
+                onClick={() => router.back()}
+                title="Back"
+                aria-label="Back"
+                className="h-9 w-9 grid place-items-center rounded-[var(--tt-radius)] border border-[var(--tt-border)] text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] hover:tt-tint-1 transition-colors shrink-0 mt-0.5"
+              >
+                <ArrowLeft size={16} />
+              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-dim)] mb-1">
+                  <Activity size={11} className="text-[var(--tt-brand)]" />
+                  Session trace
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {agent && <AgentBadge agent={agent} />}
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(id)}
+                    title="Copy session id"
+                    className="inline-flex items-center gap-1.5 font-mono text-[11px] text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] bg-[var(--tt-sunken)] border border-[var(--tt-border)] px-2 h-6 rounded-md transition-colors"
+                  >
+                    {id.slice(0, 12)}…<Copy size={10} className="opacity-60" />
+                  </button>
+                  {modelsUsed.slice(0, 3).map((m) => (
+                    <Badge key={m} variant="success" size="xs" className="font-mono normal-case max-w-[260px] truncate" title={m}>
+                      <Cpu size={10} /> {m}
+                    </Badge>
+                  ))}
+                  {modelsUsed.length > 3 && (
+                    <span className="text-[10px] font-mono text-[var(--tt-fg-dim)]">+{modelsUsed.length - 3}</span>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3 flex-wrap justify-end">
-               {/* Stats strip */}
-               <div className="flex items-center gap-1.5 flex-wrap">
-                  <StatPill icon={<Hash size={12} />} label="Steps" value={stats.total} />
-                  <StatPill icon={<Wrench size={12} />} label="Tools" value={stats.toolCalls} tone="blue" />
-                  {sessionInfo?.artifacts && sessionInfo.artifacts.length > 0 && <StatPill icon={<LayoutPanelLeft size={12} />} label="Arts" value={sessionInfo.artifacts.length} tone="emerald" />}
-                  <StatPill icon={<Brain size={12} />} label="Reason" value={stats.reasoning} tone="amber" />
-                  <StatPill icon={<User size={12} />} label="Turns" value={stats.userTurns} />
-                  <StatPill icon={<Clock size={12} />} label="Dur" value={stats.duration} />
-                  <StatPill icon={<AlertTriangle size={12} />} label="Err" value={stats.errors} tone={stats.errors > 0 ? "red" : undefined} />
-               </div>
-               {/* RESTORED: Token Telemetry */}
-               {sessionInfo?.tokens && (
-                  <div className="hidden lg:flex items-center gap-4 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shadow-inner">
-                     <div className="flex flex-col items-center">
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Input</span>
-                        <span className="text-xs font-bold text-slate-300">{sessionInfo.tokens.input.toLocaleString()}</span>
-                     </div>
-                     <div className="w-px h-6 bg-slate-800"></div>
-                     <div className="flex flex-col items-center">
-                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Output</span>
-                        <span className="text-xs font-bold text-slate-300">{sessionInfo.tokens.output.toLocaleString()}</span>
-                     </div>
-                     <div className="w-px h-6 bg-slate-800"></div>
-                     <div className="flex flex-col items-center">
-                        <span className="text-[8px] font-black text-cyan-500 uppercase tracking-widest">Cache Hit</span>
-                        <span className="text-xs font-bold text-cyan-400">{sessionInfo.tokens.cached.toLocaleString()}</span>
-                     </div>
-                  </div>
-               )}
-
-               <button 
-                  onClick={() => setSplitView(!splitView)}
-                  className={`p-2 px-4 rounded-xl border transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${splitView ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/20' : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'}`}
-               >
-                  <LayoutPanelLeft size={16} />
-                  {splitView ? 'Unified' : 'Split Brain'}
-               </button>
+            <div className="flex items-center gap-2 flex-wrap justify-end">
+              <div className="flex items-center gap-1 flex-wrap">
+                <StatPill icon={<Hash size={11} />}     label="Steps"  value={stats.total} />
+                <StatPill icon={<Wrench size={11} />}   label="Tools"  value={stats.toolCalls} tone="blue" />
+                {sessionInfo?.artifacts && sessionInfo.artifacts.length > 0 && <StatPill icon={<LayoutPanelLeft size={11} />} label="Arts" value={sessionInfo.artifacts.length} tone="emerald" />}
+                <StatPill icon={<Brain size={11} />}    label="Reason" value={stats.reasoning} tone="amber" />
+                <StatPill icon={<User size={11} />}     label="Turns"  value={stats.userTurns} />
+                <StatPill icon={<Clock size={11} />}    label="Dur"    value={stats.duration} />
+                <StatPill icon={<AlertTriangle size={11} />} label="Err" value={stats.errors} tone={stats.errors > 0 ? "red" : undefined} />
+              </div>
+              {sessionInfo?.tokens && (
+                <div className="hidden lg:flex items-center gap-3 bg-[var(--tt-sunken)] px-3 h-9 rounded-[var(--tt-radius)] border border-[var(--tt-border)]">
+                  <TokenStat label="Input"  value={sessionInfo.tokens.input.toLocaleString()} />
+                  <span className="w-px h-5 bg-[var(--tt-border)]" />
+                  <TokenStat label="Output" value={sessionInfo.tokens.output.toLocaleString()} />
+                  <span className="w-px h-5 bg-[var(--tt-border)]" />
+                  <TokenStat label="Cached" value={sessionInfo.tokens.cached.toLocaleString()} accent="text-[var(--tt-cyan-fg)]" />
+                </div>
+              )}
+              <Button
+                variant={splitView ? "primary" : "secondary"}
+                size="md"
+                onClick={() => setSplitView(!splitView)}
+              >
+                <LayoutPanelLeft size={14} />
+                {splitView ? "Unified view" : "Split brain"}
+              </Button>
             </div>
           </div>
 
-          {/* Timeline Scrubber */}
+          {/* Timeline scrubber */}
           {!loading && events.length > 0 && (
-             <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex items-center gap-6 shadow-inner">
-                <div className="flex items-center gap-2">
-                   <button 
-                     onClick={() => setPlaybackIndex(Math.max(0, playbackIndex - 1))}
-                     className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
-                   >
-                      <ChevronLeft size={18} />
-                   </button>
-                   <button
-                     onClick={togglePlay}
-                     title={isPlaying ? "Pause replay" : (playbackIndex >= events.length ? "Replay from start" : "Resume replay")}
-                     className="p-2 bg-blue-600 text-white rounded-xl hover:bg-blue-500 shadow-lg shadow-blue-900/30 transition-all active:scale-95"
-                   >
-                      {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                   </button>
-                   <button 
-                     onClick={() => setPlaybackIndex(Math.min(events.length, playbackIndex + 1))}
-                     className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
-                   >
-                      <ChevronRight size={18} />
-                   </button>
+            <div className="bg-[var(--tt-sunken)] px-4 py-3 rounded-[var(--tt-radius)] border border-[var(--tt-border)] flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPlaybackIndex(Math.max(0, playbackIndex - 1))}
+                  aria-label="Previous step"
+                  className="h-8 w-8 grid place-items-center rounded-md text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] hover:tt-tint-1 transition-colors"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  onClick={togglePlay}
+                  title={isPlaying ? "Pause replay" : (playbackIndex >= events.length ? "Replay from start" : "Resume replay")}
+                  className="h-8 w-8 grid place-items-center rounded-md bg-[var(--tt-brand-strong)] hover:bg-[var(--tt-brand)] text-white transition-colors active:scale-95"
+                >
+                  {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+                <button
+                  onClick={() => setPlaybackIndex(Math.min(events.length, playbackIndex + 1))}
+                  aria-label="Next step"
+                  className="h-8 w-8 grid place-items-center rounded-md text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] hover:tt-tint-1 transition-colors"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+              <div className="flex-1 flex flex-col gap-1.5">
+                <input
+                  type="range"
+                  min="0"
+                  max={events.length}
+                  value={playbackIndex}
+                  onChange={(e) => setPlaybackIndex(parseInt(e.target.value))}
+                  className="w-full h-1 rounded-full appearance-none cursor-pointer accent-[var(--tt-brand)]"
+                  style={{ background: `linear-gradient(to right, var(--tt-brand) 0%, var(--tt-brand) ${(playbackIndex / Math.max(1, events.length)) * 100}%, rgba(255,255,255,0.06) ${(playbackIndex / Math.max(1, events.length)) * 100}%, rgba(255,255,255,0.06) 100%)` }}
+                />
+                <div className="flex justify-between text-[10px] tabular text-[var(--tt-fg-dim)]">
+                  <span className="uppercase tracking-[0.16em]">Start</span>
+                  <span className="font-mono text-[var(--tt-brand)]">Step {playbackIndex} / {events.length}</span>
+                  <span className="uppercase tracking-[0.16em]">End</span>
                 </div>
-                
-                <div className="flex-1 flex flex-col gap-2">
-                   <input 
-                      type="range" 
-                      min="0" 
-                      max={events.length} 
-                      value={playbackIndex} 
-                      onChange={(e) => setPlaybackIndex(parseInt(e.target.value))}
-                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                   />
-                   <div className="flex justify-between text-[8px] font-black text-slate-600 uppercase tracking-[0.2em]">
-                      <span>Session Start</span>
-                      <span className="text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">Step {playbackIndex} of {events.length}</span>
-                      <span>Real-time Tip</span>
-                   </div>
-                </div>
-             </div>
+              </div>
+            </div>
           )}
         </div>
       </header>
 
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-slate-500 flex-col gap-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-          <span className="font-black text-xs uppercase tracking-[0.3em]">Reconstructing Log Streams...</span>
+        <div className="flex-1 flex items-center justify-center text-[var(--tt-fg-dim)] flex-col gap-4 p-12">
+          <div className="w-full max-w-3xl space-y-3">
+            <Skeleton className="h-10 w-1/2" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+          <span className="text-[11px] uppercase tracking-[0.18em] text-[var(--tt-fg-dim)]">Loading session trace…</span>
+        </div>
+      ) : events.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center p-12">
+          <div className="max-w-md text-center space-y-4">
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-[var(--tt-radius-lg)] bg-[var(--tt-panel)] border border-[var(--tt-border)] text-[var(--tt-fg-dim)]">
+              <Info size={20} />
+            </div>
+            <div>
+              <h2 className="text-[15px] font-semibold text-[var(--tt-fg)] mb-1">No trace available</h2>
+              <p className="text-[12px] text-[var(--tt-fg-muted)] leading-relaxed">
+                {agent === "antigravity"
+                  ? "Antigravity sessions are tracked from log metadata only — TokenTelemetry doesn't capture per-step events for this agent. Aggregate stats still appear in Insights and Analytics."
+                  : "This session was registered but no per-step events were found in the local log. The session metadata still appears in Insights and Analytics."}
+              </p>
+            </div>
+          </div>
         </div>
       ) : (
         <main className={`flex-1 w-full max-w-[1800px] mx-auto grid min-h-0 ${sidebarOpen ? "grid-cols-[240px_1fr_380px]" : "grid-cols-[240px_1fr_40px]"}`}>
           {/* LEFT: Step Index */}
-          <aside className="border-r border-slate-800 bg-slate-950/40 overflow-y-auto max-h-[calc(100vh-200px)] sticky top-[200px]">
-             <div className="px-3 py-2 border-b border-slate-800 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+          <aside className="border-r border-[var(--tt-border)] bg-[var(--tt-sunken)]/60 overflow-y-auto max-h-[calc(100vh-200px)] sticky top-[200px]">
+             <div className="px-3 py-2 border-b border-[var(--tt-border)] flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-dim)]">
                 <ListMusic size={12} /> Step Index
              </div>
              <div className="py-1">
@@ -542,7 +578,7 @@ export default function SessionDetailPage() {
           <section className="overflow-y-auto max-h-[calc(100vh-200px)] p-8">
              <div className={splitView ? "grid grid-cols-2 gap-8" : "space-y-8"}>
                 <div className="space-y-8">
-                   {splitView && <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2 mb-2 flex items-center gap-2"><User size={14}/> User & Agent Dialogue</h3>}
+                   {splitView && <h3 className="text-[10px] font-black text-[var(--tt-fg-dim)] uppercase tracking-[0.2em] ml-2 mb-2 flex items-center gap-2"><User size={14}/> User & Agent Dialogue</h3>}
                    {visibleEvents.map((event, idx) => {
                       const isReasoning = event.type === "agent_reasoning" || event.thoughts || (event.message?.role === "assistant" && (hasContentType(event, "thinking") || hasContentType(event, "thought"))) || event.payload?.type === "reasoning" || event.type === "assistant_thinking";
                       const isTool = event.toolCalls || (event.message?.role === "assistant" && hasContentType(event, "tool_use")) || (event.type === "user" && hasContentType(event, "tool_result")) || event.payload?.type === "function_call";
@@ -561,15 +597,15 @@ export default function SessionDetailPage() {
                       if (splitView && ((isReasoning || hasThinkingPart) && !hasText)) return null;
                       const kind = eventKind(event);
                       return (
-                         <div key={idx} ref={(el) => { stepRefs.current[idx] = el; }} className={activeStep === idx ? `${stepRingClass[kind]} rounded-3xl` : ""}>
+                         <div key={idx} ref={(el) => { stepRefs.current[idx] = el; }} className={activeStep === idx ? `${stepRingClass[kind]} rounded-[var(--tt-radius-lg)]` : ""}>
                             <EventCard event={event} mode={splitView ? "dialogue" : "all"} agent={agent} />
                          </div>
                       );
                    })}
                 </div>
                 {splitView && (
-                   <div className="space-y-8 border-l border-slate-800/50 pl-8">
-                      <h3 className="text-[10px] font-black text-emerald-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2"><Brain size={14}/> Internal Reasoning & Tools</h3>
+                   <div className="space-y-8 border-l border-[var(--tt-border)] pl-8">
+                      <h3 className="text-[10px] font-black text-[var(--tt-success-fg)] uppercase tracking-[0.2em] mb-2 flex items-center gap-2"><Brain size={14}/> Internal Reasoning & Tools</h3>
                       {visibleEvents.map((event, idx) => {
                          const isReasoning = event.type === "agent_reasoning" || event.thoughts || (event.message?.role === "assistant" && (hasContentType(event, "thinking") || hasContentType(event, "thought"))) || event.payload?.type === "reasoning" || event.type === "assistant_thinking";
                          const isTool = event.toolCalls || (event.message?.role === "assistant" && hasContentType(event, "tool_use")) || (event.type === "user" && hasContentType(event, "tool_result")) || event.payload?.type === "function_call";
@@ -579,7 +615,7 @@ export default function SessionDetailPage() {
                          if (!isReasoning && !isTool && !hasThinkingPart) return null;
                          const kind = eventKind(event);
                          return (
-                            <div key={idx} ref={(el) => { stepRefs.current[idx] = el; }} className={activeStep === idx ? `${stepRingClass[kind]} rounded-3xl` : ""}>
+                            <div key={idx} ref={(el) => { stepRefs.current[idx] = el; }} className={activeStep === idx ? `${stepRingClass[kind]} rounded-[var(--tt-radius-lg)]` : ""}>
                                <EventCard event={event} mode="brain" agent={agent} />
                             </div>
                          );
@@ -590,19 +626,19 @@ export default function SessionDetailPage() {
           </section>
 
           {/* RIGHT: Sidebar */}
-          <aside className="border-l border-slate-800 bg-slate-950/40 overflow-y-auto max-h-[calc(100vh-200px)] sticky top-[200px]">
+          <aside className="border-l border-[var(--tt-border)] bg-[var(--tt-sunken)]/60 overflow-y-auto max-h-[calc(100vh-200px)] sticky top-[200px]">
              {!sidebarOpen ? (
                 <button
                    onClick={() => setSidebarOpen(true)}
                    title="Open inspector"
-                   className="w-full h-full flex flex-col items-center justify-start gap-3 pt-4 text-slate-500 hover:text-blue-400 hover:bg-slate-900/60 transition-colors"
+                   className="w-full h-full flex flex-col items-center justify-start gap-3 pt-4 text-[var(--tt-fg-dim)] hover:text-[var(--tt-brand)] hover:bg-[var(--tt-panel)]/70 transition-colors"
                 >
                    <ChevronLeft size={16} />
-                   <span className="text-[9px] font-black uppercase tracking-[0.3em] [writing-mode:vertical-rl] rotate-180">Inspector</span>
+                   <span className="text-[9px] font-semibold uppercase tracking-[0.18em] [writing-mode:vertical-rl] rotate-180">Inspector</span>
                 </button>
              ) : (
              <>
-             <div className="flex border-b border-slate-800 text-[10px] font-black uppercase tracking-[0.2em]">
+             <div className="flex border-b border-[var(--tt-border)] text-[10px] font-semibold uppercase tracking-[0.18em]">
                 <TabBtn active={sidebarTab === "context"} onClick={() => setSidebarTab("context")} icon={<Settings2 size={12} />}>Context</TabBtn>
                 <TabBtn active={sidebarTab === "tools"} onClick={() => setSidebarTab("tools")} icon={<Wrench size={12} />}>Tools</TabBtn>
                 {sessionInfo?.artifacts && sessionInfo.artifacts.length > 0 && <TabBtn active={sidebarTab === "artifacts"} onClick={() => setSidebarTab("artifacts")} icon={<LayoutPanelLeft size={12} />}>Artifacts</TabBtn>}
@@ -610,7 +646,7 @@ export default function SessionDetailPage() {
                 <button
                    onClick={() => setSidebarOpen(false)}
                    title="Close inspector"
-                   className="px-3 border-l border-slate-800 text-slate-500 hover:text-white hover:bg-slate-900 transition-colors"
+                   className="px-3 border-l border-[var(--tt-border)] text-[var(--tt-fg-dim)] hover:text-[var(--tt-fg)] hover:bg-[var(--tt-panel)] transition-colors"
                 >
                    <ChevronRight size={14} />
                 </button>
@@ -627,7 +663,7 @@ export default function SessionDetailPage() {
                 }} />}
                 {sidebarTab === "artifacts" && <ArtifactsPanel artifacts={sessionInfo?.artifacts || []} />}
                 {sidebarTab === "raw" && (
-                   <pre className="text-[9px] font-mono text-slate-400 whitespace-pre-wrap break-all max-h-[calc(100vh-260px)] overflow-y-auto">
+                   <pre className="text-[9px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap break-all max-h-[calc(100vh-260px)] overflow-y-auto">
                       {JSON.stringify(activeStep !== null ? events[activeStep] : events[0], null, 2)}
                    </pre>
                 )}
@@ -640,7 +676,7 @@ export default function SessionDetailPage() {
 
       {/* RESTORED: Waterfall Footer */}
       {!loading && waterfallData.length > 0 && (
-         <footer className="bg-slate-900 border-t border-slate-800 sticky bottom-0 z-40 backdrop-blur-xl bg-opacity-80">
+         <footer className="bg-[var(--tt-panel)] border-t border-[var(--tt-border)] sticky bottom-0 z-40 backdrop-blur-xl bg-opacity-80">
             <div className={`max-w-[1600px] mx-auto ${timelineOpen ? "p-6" : "px-6 py-2"}`}>
                <div className={`flex items-center justify-between ${timelineOpen ? "mb-6" : ""}`}>
                   <button
@@ -649,18 +685,18 @@ export default function SessionDetailPage() {
                      title={timelineOpen ? "Collapse timeline" : "Expand timeline"}
                   >
                      <div className="p-1.5 bg-blue-500/10 rounded-lg border border-blue-500/20 group-hover:bg-blue-500/20 transition-colors">
-                        <ListMusic size={16} className="text-blue-400" />
+                        <ListMusic size={16} className="text-[var(--tt-brand)]" />
                      </div>
-                     <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Execution Timeline</span>
-                     <span className="text-slate-500 group-hover:text-slate-300 transition-colors">
+                     <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg)]">Execution Timeline</span>
+                     <span className="text-[var(--tt-fg-dim)] group-hover:text-[var(--tt-fg)] transition-colors">
                         {timelineOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
                      </span>
                   </button>
                   <div className="flex items-center gap-3">
-                     <span className="text-[9px] font-mono text-slate-500">{waterfallData.length} Tools Invoked</span>
+                     <span className="text-[9px] font-mono text-[var(--tt-fg-dim)]">{waterfallData.length} Tools Invoked</span>
                      <button
                         onClick={() => setTimelineOpen((v) => !v)}
-                        className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 hover:text-white px-2 py-1 rounded-md border border-slate-800 hover:border-slate-700 bg-slate-950/60 transition-colors"
+                        className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] px-2 py-1 rounded-md border border-[var(--tt-border)] hover:border-[var(--tt-border-strong)] bg-[var(--tt-sunken)]/80 transition-colors"
                      >
                         {timelineOpen ? "Close" : "Open"}
                      </button>
@@ -676,10 +712,10 @@ export default function SessionDetailPage() {
                      return (
                         <div key={i} className="flex items-center gap-4 group">
                            <div className="w-28 flex flex-col">
-                              <span className="text-[9px] font-bold text-slate-400 truncate group-hover:text-white transition-colors">{tool.name}</span>
-                              <span className="text-[7px] font-mono text-slate-600 uppercase">{(tool.end - tool.start).toFixed(0)}ms</span>
+                              <span className="text-[9px] font-bold text-[var(--tt-fg-muted)] truncate group-hover:text-[var(--tt-fg)] transition-colors">{tool.name}</span>
+                              <span className="text-[7px] font-mono text-[var(--tt-fg-faint)] uppercase">{(tool.end - tool.start).toFixed(0)}ms</span>
                            </div>
-                           <div className="flex-1 bg-slate-950 h-3 rounded-full relative border border-slate-800/50 shadow-inner">
+                           <div className="flex-1 bg-[var(--tt-sunken)] h-3 rounded-full relative border border-[var(--tt-border)]">
                               <div 
                                  className="absolute h-full bg-gradient-to-r from-blue-600/30 to-blue-500/60 border-r border-blue-400 rounded-full group-hover:from-blue-500 group-hover:to-blue-400 transition-all"
                                  style={{ left: `${left}%`, width: `${Math.max(1, width)}%` }}
@@ -698,18 +734,27 @@ export default function SessionDetailPage() {
 }
 
 function StatPill({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number | string; tone?: "blue" | "amber" | "red" | "emerald" | "cyan" }) {
-  const toneCls = 
-    tone === "blue" ? "text-blue-400" : 
-    tone === "amber" ? "text-amber-400" : 
-    tone === "red" ? "text-red-400" : 
-    tone === "emerald" ? "text-emerald-400" :
-    tone === "cyan" ? "text-cyan-400" :
-    "text-slate-300";
+  const toneCls =
+    tone === "blue"    ? "text-[var(--tt-brand)]" :
+    tone === "amber"   ? "text-[var(--tt-warn-fg)]" :
+    tone === "red"     ? "text-[var(--tt-danger-fg)]" :
+    tone === "emerald" ? "text-[var(--tt-success-fg)]" :
+    tone === "cyan"    ? "text-[var(--tt-cyan-fg)]" :
+    "text-[var(--tt-fg)]";
   return (
-    <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1 shadow-inner">
-      <span className="text-slate-600">{icon}</span>
-      <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{label}</span>
-      <span className={`text-[11px] font-black tabular-nums ${toneCls}`}>{value}</span>
+    <div className="inline-flex items-center gap-1.5 bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-md px-2 h-7">
+      <span className="text-[var(--tt-fg-faint)]">{icon}</span>
+      <span className="text-[10px] font-medium text-[var(--tt-fg-dim)] uppercase tracking-[0.14em]">{label}</span>
+      <span className={`text-[12px] font-semibold tabular ${toneCls}`}>{value}</span>
+    </div>
+  );
+}
+
+function TokenStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="flex flex-col items-center leading-tight">
+      <span className={`text-[10px] uppercase tracking-[0.14em] ${accent ?? "text-[var(--tt-fg-dim)]"}`}>{label}</span>
+      <span className={`text-[12px] font-semibold tabular ${accent ?? "text-[var(--tt-fg)]"}`}>{value}</span>
     </div>
   );
 }
@@ -718,7 +763,7 @@ function TabBtn({ active, onClick, icon, children }: { active: boolean; onClick:
   return (
     <button
       onClick={onClick}
-      className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 border-b-2 transition-colors ${active ? "border-blue-500 text-blue-400 bg-blue-500/5" : "border-transparent text-slate-500 hover:text-slate-300"}`}
+      className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 border-b-2 transition-colors ${active ? "border-blue-500 text-[var(--tt-brand)] bg-blue-500/5" : "border-transparent text-[var(--tt-fg-dim)] hover:text-[var(--tt-fg)]"}`}
     >
       {icon}
       {children}
@@ -737,22 +782,22 @@ function StepRow({ step, active, beyond, onClick }: { step: Step; active: boolea
     other: <Zap size={11} />,
   };
   const color: Record<StepKind, string> = {
-    user: "text-blue-400",
-    assistant: "text-emerald-400",
-    reasoning: "text-amber-400",
+    user: "text-[var(--tt-brand)]",
+    assistant: "text-[var(--tt-success-fg)]",
+    reasoning: "text-[var(--tt-warn-fg)]",
     tool: "text-sky-400",
-    tool_result: "text-slate-500",
-    meta: "text-slate-600",
-    other: "text-slate-600",
+    tool_result: "text-[var(--tt-fg-dim)]",
+    meta: "text-[var(--tt-fg-faint)]",
+    other: "text-[var(--tt-fg-faint)]",
   };
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono border-l-2 transition-colors ${active ? "bg-blue-500/10 border-blue-500" : "border-transparent hover:bg-slate-900/60"} ${beyond ? "opacity-30" : ""}`}
+      className={`w-full text-left flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono border-l-2 transition-colors ${active ? "bg-blue-500/10 border-blue-500" : "border-transparent hover:bg-[var(--tt-panel)]/70"} ${beyond ? "opacity-30" : ""}`}
     >
-      <span className="text-slate-600 w-7 tabular-nums">{step.idx.toString().padStart(3, "0")}</span>
+      <span className="text-[var(--tt-fg-faint)] w-7 tabular-nums">{step.idx.toString().padStart(3, "0")}</span>
       <span className={color[step.kind]}>{icon[step.kind]}</span>
-      <span className="text-slate-300 truncate flex-1">{step.label}</span>
+      <span className="text-[var(--tt-fg)] truncate flex-1">{step.label}</span>
     </button>
   );
 }
@@ -761,39 +806,39 @@ function ContextPanel({ ctx }: { ctx: any }) {
   const Row = ({ k, v, mono = true }: { k: string; v?: any; mono?: boolean }) =>
     v ? (
       <div className="space-y-0.5">
-        <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">{k}</div>
-        <div className={`text-slate-300 break-all ${mono ? "font-mono text-[10px]" : ""}`}>{typeof v === "string" ? v : JSON.stringify(v)}</div>
+        <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)]">{k}</div>
+        <div className={`text-[var(--tt-fg)] break-all ${mono ? "font-mono text-[10px]" : ""}`}>{typeof v === "string" ? v : JSON.stringify(v)}</div>
       </div>
     ) : null;
   const hasAny = ctx.model || ctx.cwd || ctx.systemPrompt || ctx.instructions || ctx.sandbox;
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-muted)]">
         <Cpu size={12} /> Session Context
       </div>
       {ctx.sessionId && (
         <div className="space-y-1">
-          <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">Session ID</div>
-          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded px-2 py-1.5">
-            <span className="text-[10px] font-mono text-slate-300 break-all flex-1" title={ctx.sessionId}>{ctx.sessionId}</span>
+          <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)]">Session ID</div>
+          <div className="flex items-center gap-1.5 bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded px-2 py-1.5">
+            <span className="text-[10px] font-mono text-[var(--tt-fg)] break-all flex-1" title={ctx.sessionId}>{ctx.sessionId}</span>
             <button
               onClick={() => { navigator.clipboard?.writeText(ctx.sessionId); }}
-              className="text-[9px] font-black uppercase text-slate-500 hover:text-blue-400 transition-colors px-1"
+              className="text-[9px] font-black uppercase text-[var(--tt-fg-dim)] hover:text-[var(--tt-brand)] transition-colors px-1"
               title="Copy">
               copy
             </button>
           </div>
-          {ctx.agent && <div className="text-[9px] font-mono text-slate-600 uppercase">agent: {ctx.agent}</div>}
+          {ctx.agent && <div className="text-[9px] font-mono text-[var(--tt-fg-faint)] uppercase">agent: {ctx.agent}</div>}
         </div>
       )}
       <Row k="Model" v={ctx.model} />
       <Row k="Provider" v={ctx.provider} />
       {ctx.modelsUsed && ctx.modelsUsed.length > 0 && (
         <div className="space-y-1">
-          <div className="text-[9px] font-black uppercase tracking-widest text-slate-500">Models Used ({ctx.modelsUsed.length})</div>
+          <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)]">Models Used ({ctx.modelsUsed.length})</div>
           <div className="flex flex-wrap gap-1.5">
             {ctx.modelsUsed.map((m: string) => (
-              <span key={m} className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+              <span key={m} className="flex items-center gap-1 text-[10px] font-mono text-[var(--tt-success-fg)] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
                 <Cpu size={10} /> {m}
               </span>
             ))}
@@ -803,13 +848,13 @@ function ContextPanel({ ctx }: { ctx: any }) {
       <Row k="CWD" v={ctx.cwd} />
 
       {ctx.projectConfig && (ctx.projectConfig.counts?.skills > 0 || ctx.projectConfig.counts?.mcps > 0) && (
-        <div className="space-y-3 pt-2 border-t border-slate-800">
-          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+        <div className="space-y-3 pt-2 border-t border-[var(--tt-border)]">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-muted)]">
             <Settings2 size={12} /> Project Configuration
           </div>
           {ctx.projectConfig.counts.skills > 0 && (
             <details open>
-              <summary className="text-[9px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-slate-300">
+              <summary className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">
                 Skills ({ctx.projectConfig.counts.skills}) ▸
               </summary>
               <div className="mt-2 flex flex-wrap gap-1.5">
@@ -817,7 +862,7 @@ function ContextPanel({ ctx }: { ctx: any }) {
                   <span
                     key={i}
                     title={`${s.scope} · ${s.agent}${s.description ? "\n" + s.description : ""}`}
-                    className={`text-[10px] font-mono px-2 py-0.5 rounded border ${s.scope === "project" ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20" : "bg-slate-800/60 text-slate-400 border-slate-700"}`}
+                    className={`text-[10px] font-mono px-2 py-0.5 rounded border ${s.scope === "project" ? "bg-cyan-500/10 text-[var(--tt-cyan-fg)] border-cyan-500/20" : "tt-tint-2 text-[var(--tt-fg-muted)] border-[var(--tt-border-strong)]"}`}
                   >
                     {s.name}
                   </span>
@@ -827,14 +872,14 @@ function ContextPanel({ ctx }: { ctx: any }) {
           )}
           {ctx.projectConfig.counts.mcps > 0 && (
             <details open>
-              <summary className="text-[9px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-slate-300">
+              <summary className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">
                 MCP Servers ({ctx.projectConfig.counts.mcps}) ▸
               </summary>
               <div className="mt-2 space-y-1">
                 {ctx.projectConfig.mcps.map((m: any, i: number) => (
-                  <div key={i} className="flex items-center justify-between gap-2 text-[10px] font-mono bg-slate-900/60 border border-slate-800 rounded px-2 py-1">
-                    <span className="text-slate-300 truncate" title={m.command || m.url || ""}>{m.name}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${m.scope === "project" ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>{m.agent}</span>
+                  <div key={i} className="flex items-center justify-between gap-2 text-[10px] font-mono bg-[var(--tt-panel)]/70 border border-[var(--tt-border)] rounded px-2 py-1">
+                    <span className="text-[var(--tt-fg)] truncate" title={m.command || m.url || ""}>{m.name}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${m.scope === "project" ? "bg-blue-500/10 text-[var(--tt-brand)] border border-blue-500/20" : "tt-tint-2 text-[var(--tt-fg-muted)] border border-[var(--tt-border-strong)]"}`}>{m.agent}</span>
                   </div>
                 ))}
               </div>
@@ -848,14 +893,14 @@ function ContextPanel({ ctx }: { ctx: any }) {
       <Row k="Reasoning Effort" v={ctx.reasoningEffort} />
       {ctx.instructions && (
         <details>
-          <summary className="text-[9px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-slate-300">Instructions ▸</summary>
-          <pre className="mt-2 text-[10px] font-mono text-slate-400 whitespace-pre-wrap bg-slate-950 border border-slate-800 rounded-lg p-3 max-h-64 overflow-y-auto">{ctx.instructions}</pre>
+          <summary className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">Instructions ▸</summary>
+          <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">{ctx.instructions}</pre>
         </details>
       )}
       {ctx.systemPrompt && (
         <details>
-          <summary className="text-[9px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-slate-300">System Prompt ▸</summary>
-          <pre className="mt-2 text-[10px] font-mono text-slate-400 whitespace-pre-wrap bg-slate-950 border border-slate-800 rounded-lg p-3 max-h-64 overflow-y-auto">
+          <summary className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">System Prompt ▸</summary>
+          <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">
             {ctx.systemPrompt.slice(0, 4000)}
             {ctx.systemPrompt.length > 4000 ? "\n…(truncated)" : ""}
           </pre>
@@ -863,33 +908,33 @@ function ContextPanel({ ctx }: { ctx: any }) {
       )}
       {ctx.env && (
         <details>
-          <summary className="text-[9px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-slate-300">Environment ▸</summary>
-          <pre className="mt-2 text-[10px] font-mono text-slate-400 whitespace-pre-wrap bg-slate-950 border border-slate-800 rounded-lg p-3 max-h-48 overflow-y-auto">{JSON.stringify(ctx.env, null, 2)}</pre>
+          <summary className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">Environment ▸</summary>
+          <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-48 overflow-y-auto">{JSON.stringify(ctx.env, null, 2)}</pre>
         </details>
       )}
-      {!hasAny && <div className="text-slate-600 text-[10px] italic">No context metadata found for this session.</div>}
+      {!hasAny && <div className="text-[var(--tt-fg-faint)] text-[10px] italic">No context metadata found for this session.</div>}
     </div>
   );
 }
 
 function ToolsPanel({ summary, onJump }: { summary: { name: string; count: number; avg: number }[]; onJump: (name: string) => void }) {
-  if (!summary.length) return <div className="text-slate-600 text-[10px] italic">No tool calls in this session.</div>;
+  if (!summary.length) return <div className="text-[var(--tt-fg-faint)] text-[10px] italic">No tool calls in this session.</div>;
   const maxCount = summary[0]?.count || 1;
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-muted)]">
         <Wrench size={12} /> Tool Summary
       </div>
       {summary.map((t) => (
-        <button key={t.name} onClick={() => onJump(t.name)} className="w-full text-left bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-lg px-3 py-2 transition-colors">
+        <button key={t.name} onClick={() => onJump(t.name)} className="w-full text-left bg-[var(--tt-panel)]/70 border border-[var(--tt-border)] hover:border-[var(--tt-border-strong)] rounded-lg px-3 py-2 transition-colors">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[11px] font-mono text-slate-200 truncate">{t.name}</span>
-            <span className="text-[9px] font-black text-blue-400 tabular-nums">×{t.count}</span>
+            <span className="text-[11px] font-mono text-[var(--tt-fg)] truncate">{t.name}</span>
+            <span className="text-[9px] font-black text-[var(--tt-brand)] tabular-nums">×{t.count}</span>
           </div>
-          <div className="h-1 bg-slate-800 rounded overflow-hidden">
+          <div className="h-1 tt-tint-2 rounded overflow-hidden">
             <div className="h-full bg-blue-500/60" style={{ width: `${(t.count / maxCount) * 100}%` }} />
           </div>
-          <div className="text-[9px] font-mono text-slate-600 mt-1">avg {t.avg >= 1000 ? `${(t.avg / 1000).toFixed(2)}s` : `${t.avg.toFixed(0)}ms`}</div>
+          <div className="text-[9px] font-mono text-[var(--tt-fg-faint)] mt-1">avg {t.avg >= 1000 ? `${(t.avg / 1000).toFixed(2)}s` : `${t.avg.toFixed(0)}ms`}</div>
         </button>
       ))}
     </div>
@@ -897,28 +942,28 @@ function ToolsPanel({ summary, onJump }: { summary: { name: string; count: numbe
 }
 
 function ArtifactsPanel({ artifacts }: { artifacts: Artifact[] }) {
-  if (!artifacts.length) return <div className="text-slate-600 text-[10px] italic">No artifacts for this session.</div>;
+  if (!artifacts.length) return <div className="text-[var(--tt-fg-faint)] text-[10px] italic">No artifacts for this session.</div>;
   
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--tt-fg-muted)]">
         <LayoutPanelLeft size={12} /> Session Artifacts
       </div>
       <div className="space-y-4">
         {artifacts.map((a, i) => (
-          <div key={i} className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden shadow-lg group text-[11px]">
-            <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/40 flex items-center justify-between">
+          <div key={i} className="bg-[var(--tt-panel)]/70 border border-[var(--tt-border)] rounded-xl overflow-hidden group text-[11px]">
+            <div className="px-3 py-2 border-b border-[var(--tt-border)] bg-[var(--tt-sunken)]/60 flex items-center justify-between">
                <div className="flex items-center gap-2 min-w-0">
-                  {a.type === 'video' ? <Play size={10} className="text-blue-400" /> : 
-                   a.type === 'image' ? <LayoutPanelLeft size={10} className="text-emerald-400" /> :
-                   a.type === 'terminal' ? <Terminal size={10} className="text-purple-400" /> :
-                   <FileText size={10} className="text-slate-400" />}
-                  <span className="text-[10px] font-mono text-slate-300 truncate" title={a.name}>{a.name}</span>
+                  {a.type === 'video' ? <Play size={10} className="text-[var(--tt-brand)]" /> : 
+                   a.type === 'image' ? <LayoutPanelLeft size={10} className="text-[var(--tt-success-fg)]" /> :
+                   a.type === 'terminal' ? <Terminal size={10} className="text-[var(--tt-violet-fg)]" /> :
+                   <FileText size={10} className="text-[var(--tt-fg-muted)]" />}
+                  <span className="text-[10px] font-mono text-[var(--tt-fg)] truncate" title={a.name}>{a.name}</span>
                </div>
                <a 
                  href={`http://127.0.0.1:8000/artifacts?path=${encodeURIComponent(a.path)}`} 
                  download={a.name}
-                 className="text-[8px] font-black uppercase text-slate-500 hover:text-white transition-colors"
+                 className="text-[8px] font-black uppercase text-[var(--tt-fg-dim)] hover:text-[var(--tt-fg)] transition-colors"
                >
                  DL
                </a>
@@ -926,7 +971,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: Artifact[] }) {
             
             <div className="p-3">
                {a.type === 'video' && (
-                 <video controls className="w-full rounded-lg shadow-inner bg-black aspect-video">
+                 <video controls className="w-full rounded-lg bg-black aspect-video">
                    <source src={`http://127.0.0.1:8000/artifacts?path=${encodeURIComponent(a.path)}`} type="video/mp4" />
                    Your browser does not support the video tag.
                  </video>
@@ -935,7 +980,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: Artifact[] }) {
                  <img 
                     src={`http://127.0.0.1:8000/artifacts?path=${encodeURIComponent(a.path)}`} 
                     alt={a.name} 
-                    className="w-full rounded-lg shadow-inner bg-slate-950" 
+                    className="w-full rounded-lg bg-[var(--tt-sunken)]" 
                  />
                )}
                {(a.type === 'terminal' || a.type === 'document') && (
@@ -965,9 +1010,9 @@ function ArtifactViewer({ path }: { path: string }) {
       .catch(() => setLoading(false));
   }, [path]);
 
-  if (loading) return <div className="animate-pulse h-4 bg-slate-800 rounded w-1/2"></div>;
+  if (loading) return <div className="animate-pulse h-4 tt-tint-2 rounded w-1/2"></div>;
   return (
-    <pre className="text-[9px] font-mono text-slate-400 whitespace-pre-wrap break-all leading-relaxed">
+    <pre className="text-[9px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap break-all leading-relaxed">
       {content || "Failed to load content."}
     </pre>
   );
@@ -984,7 +1029,7 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     if (Number.isNaN(date.getTime())) return null;
     const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
     return (
-      <div className="flex items-center gap-1 text-[9px] font-mono text-slate-500 mb-2 opacity-60 group-hover:opacity-100 transition-opacity">
+      <div className="flex items-center gap-1 text-[9px] font-mono text-[var(--tt-fg-dim)] mb-2 opacity-60 group-hover:opacity-100 transition-opacity">
         <Clock size={10} />
         {timeStr}
       </div>
@@ -1006,15 +1051,15 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   // 1. OLLAMA
   if (agent === "ollama") {
      parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <User size={16} strokeWidth={3} /> Ollama History
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{content}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{content}</div>
         </div>
      );
   }
@@ -1023,28 +1068,28 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   if (agent === "copilot") {
     if (type === "user" && payload?.text) {
        parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <User size={16} strokeWidth={3} /> User Prompt
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.text}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.text}</div>
         </div>
        );
     }
     if (type === "assistant_thinking" && payload?.text && mode !== "dialogue") {
        parts.push(
-        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-indigo-500/50 group">
+        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-indigo-500/50 group">
           <div className="flex justify-between items-start mb-3">
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-[var(--tt-violet-fg)] font-bold text-xs uppercase tracking-widest">
               <Brain size={16} /> Copilot Reasoning
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{payload.text}</div>
+          <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{payload.text}</div>
         </div>
        );
     }
@@ -1056,24 +1101,24 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
        if (thinkingParts.length > 0 && mode !== "dialogue") {
          thinkingParts.forEach((p: any, i: number) => {
            parts.push(
-             <div key={`copilot-think-${i}`} className="bg-indigo-500/5 border border-indigo-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-indigo-500/50 group">
+             <div key={`copilot-think-${i}`} className="bg-indigo-500/5 border border-indigo-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-indigo-500/50 group">
                <div className="flex justify-between items-start mb-3">
-                 <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs uppercase tracking-widest">
+                 <div className="flex items-center gap-2 text-[var(--tt-violet-fg)] font-bold text-xs uppercase tracking-widest">
                    <Brain size={16} /> Reasoning
                  </div>
                  {renderTimestamp()}
                </div>
-               <div className="text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{p.value}</div>
+               <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{p.value}</div>
              </div>
            );
          });
        }
        if (combinedText && mode !== "brain") {
          parts.push(
-           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all">
+           <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all">
              <div className="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
              <div className="flex justify-between items-start mb-4">
-               <div className="flex items-center gap-2 text-indigo-400 font-black text-[10px] uppercase tracking-[0.2em]">
+               <div className="flex items-center gap-2 text-[var(--tt-violet-fg)] font-black text-[10px] uppercase tracking-[0.2em]">
                    <GitBranch size={16} strokeWidth={3} /> Response
                </div>
                {renderTimestamp()}
@@ -1088,15 +1133,15 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   // 3. VIBE / OPENCODE Common User Prompt
   if (type === "user" && payload?.content && !message) {
      parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <User size={16} strokeWidth={3} /> User Prompt
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.content}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.content}</div>
         </div>
      );
   }
@@ -1105,9 +1150,9 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   if (type === "assistant" && payload?.content && !message) {
     const isOpencode = agent === "opencode";
     const accent = isOpencode ? "bg-amber-600" : "bg-pink-600";
-    const textColor = isOpencode ? "text-amber-400" : "text-pink-400";
+    const textColor = isOpencode ? "text-[var(--tt-warn-fg)]" : "text-[var(--tt-danger-fg)]";
     parts.push(
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+      <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
         <div className={`absolute top-0 left-0 w-1 h-full ${accent}`}></div>
         <div className="flex justify-between items-start mb-4">
           <div className={`flex items-center gap-2 ${textColor} font-black text-[10px] uppercase tracking-[0.2em]`}>
@@ -1127,26 +1172,26 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const input = state.input;
     const output = state.output;
     parts.push(
-      <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 shadow-lg group">
+      <div className="bg-[var(--tt-panel)]/70 border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-4 group">
         <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2 text-amber-400 font-black text-[10px] uppercase tracking-[0.2em]">
+          <div className="flex items-center gap-2 text-[var(--tt-warn-fg)] font-black text-[10px] uppercase tracking-[0.2em]">
             <Wrench size={14} strokeWidth={3} /> Tool · {payload.tool || "unknown"}
           </div>
           <div className="flex items-center gap-3">
              {renderTimestamp()}
-             {status && <span className="text-[9px] font-bold uppercase tracking-widest text-slate-500">{status}</span>}
+             {status && <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--tt-fg-dim)]">{status}</span>}
           </div>
         </div>
         {input && (
           <details className="mt-1">
-            <summary className="text-[10px] font-mono text-slate-500 cursor-pointer hover:text-slate-300">input ▸</summary>
-            <pre className="mt-2 text-[10px] font-mono text-slate-400 whitespace-pre-wrap bg-slate-950 border border-slate-800 rounded-lg p-3 max-h-64 overflow-y-auto">{typeof input === "string" ? input : JSON.stringify(input, null, 2)}</pre>
+            <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">input ▸</summary>
+            <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">{typeof input === "string" ? input : JSON.stringify(input, null, 2)}</pre>
           </details>
         )}
         {output && (
           <details className="mt-1">
-            <summary className="text-[10px] font-mono text-slate-500 cursor-pointer hover:text-slate-300">output ▸</summary>
-            <pre className="mt-2 text-[10px] font-mono text-slate-400 whitespace-pre-wrap bg-slate-950 border border-slate-800 rounded-lg p-3 max-h-64 overflow-y-auto">{typeof output === "string" ? output.slice(0, 4000) : JSON.stringify(output, null, 2).slice(0, 4000)}</pre>
+            <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">output ▸</summary>
+            <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">{typeof output === "string" ? output.slice(0, 4000) : JSON.stringify(output, null, 2).slice(0, 4000)}</pre>
           </details>
         )}
       </div>
@@ -1158,14 +1203,14 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     parts.push(
       <div className="space-y-4">
         {thoughts.map((thought: any, i: number) => (
-          <div key={i} className="bg-cyan-500/5 border border-cyan-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-cyan-500/50 group">
+          <div key={i} className="bg-cyan-500/5 border border-cyan-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-cyan-500/50 group">
             <div className="flex justify-between items-start mb-3">
-              <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase tracking-widest">
+              <div className="flex items-center gap-2 text-[var(--tt-cyan-fg)] font-bold text-xs uppercase tracking-widest">
                 <Brain size={16} /> {thought.subject || "Reasoning"}
               </div>
               {renderTimestamp()}
             </div>
-            <div className="text-slate-400 whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{thought.description}</div>
+            <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{thought.description}</div>
           </div>
         ))}
       </div>
@@ -1177,26 +1222,26 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
       <div className="space-y-4">
         {toolCalls.map((call: any, i: number) => (
           <div key={i} className="space-y-4">
-            <div className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-blue-500/50 group">
+            <div className="bg-blue-500/5 border border-blue-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-blue-500/50 group">
               <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-2 text-blue-400 font-bold text-xs uppercase tracking-widest">
+                <div className="flex items-center gap-2 text-[var(--tt-brand)] font-bold text-xs uppercase tracking-widest">
                   <Code size={16} /> Tool Call: {call.name}
                 </div>
                 {renderTimestamp()}
               </div>
-              <pre className="bg-slate-950 text-blue-300 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner">
+              <pre className="bg-[var(--tt-sunken)] text-[var(--tt-brand)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)]">
                 {JSON.stringify(call.args, null, 2)}
               </pre>
             </div>
             {call.result && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl ml-8 group hover:border-emerald-500/30 transition-all">
+              <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-5 ml-8 group hover:border-emerald-500/30 transition-all">
                 <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest group-hover:text-emerald-500">
+                  <div className="flex items-center gap-2 text-[var(--tt-fg-dim)] font-bold text-xs uppercase tracking-widest group-hover:text-[var(--tt-success-fg)]">
                     <Terminal size={16} /> Tool Output
                   </div>
                   {renderTimestamp()}
                 </div>
-                <pre className="bg-slate-950 text-emerald-400 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner">
+                <pre className="bg-[var(--tt-sunken)] text-[var(--tt-success-fg)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)]">
                   {typeof call.result === 'string' ? call.result : JSON.stringify(call.result, null, 2)}
                 </pre>
               </div>
@@ -1211,15 +1256,15 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const textContent = Array.isArray(content) ? content.map((c: any) => c.text).filter(Boolean).join("\n") : (typeof content === 'string' ? content : "");
     if (textContent) {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <User size={16} strokeWidth={3} /> User Prompt
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{textContent}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{textContent}</div>
         </div>
       );
     }
@@ -1228,10 +1273,10 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   const role = event.role || event.message?.role;
   if ((type === "assistant" || role === "assistant" || role === "model" || role === "gemini" || type === "model" || type === "gemini") && typeof content === 'string' && content.trim() && mode !== "brain") {
     parts.push(
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+      <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
         <div className="absolute top-0 left-0 w-1 h-full bg-cyan-600"></div>
         <div className="flex justify-between items-start mb-4">
-          <div className="flex items-center gap-2 text-cyan-400 font-black text-[10px] uppercase tracking-[0.2em]">
+          <div className="flex items-center gap-2 text-[var(--tt-cyan-fg)] font-black text-[10px] uppercase tracking-[0.2em]">
               <Sparkles size={16} strokeWidth={3} /> Response
           </div>
           {renderTimestamp()}
@@ -1251,19 +1296,19 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     if (text) {
       const isCopilot = agent === "copilot" || type === "assistant_thinking";
       const accent = isCopilot ? "border-l-indigo-500/50" : "border-l-amber-500/50";
-      const textColor = isCopilot ? "text-indigo-400" : "text-amber-500";
+      const textColor = isCopilot ? "text-[var(--tt-violet-fg)]" : "text-[var(--tt-warn-fg)]";
       const bg = isCopilot ? "bg-indigo-500/5" : "bg-amber-500/5";
       const border = isCopilot ? "border-indigo-500/20" : "border-amber-500/20";
 
       parts.push(
-        <div className={`${bg} border ${border} rounded-2xl p-6 shadow-sm ml-4 border-l-4 ${accent} group`}>
+        <div className={`${bg} border ${border} rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 ${accent} group`}>
           <div className="flex justify-between items-start mb-3">
             <div className={`flex items-center gap-2 ${textColor} font-bold text-xs uppercase tracking-widest`}>
               <Brain size={16} /> Reasoning
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-400 whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{text}</div>
+          <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{text}</div>
         </div>
       );
     }
@@ -1274,17 +1319,17 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const toolResults = Array.isArray(message.content) ? message.content.filter((c: any) => c.type === "tool_result") : [];
     if (toolResults.length > 0 && mode !== "dialogue") {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl ml-8 group hover:border-emerald-500/30 transition-all">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-5 ml-8 group hover:border-emerald-500/30 transition-all">
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest group-hover:text-emerald-500">
+            <div className="flex items-center gap-2 text-[var(--tt-fg-dim)] font-bold text-xs uppercase tracking-widest group-hover:text-[var(--tt-success-fg)]">
               <Terminal size={16} /> Tool Output
             </div>
             {renderTimestamp()}
           </div>
           {toolResults.map((c: any, i: number) => (
             <div key={i} className="space-y-3 mb-6 last:mb-0">
-               <div className="text-[9px] font-mono text-slate-600 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 w-fit">ID: {c.tool_use_id}</div>
-              <pre className="bg-slate-950 text-emerald-400 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner">
+               <div className="text-[9px] font-mono text-[var(--tt-fg-faint)] bg-[var(--tt-sunken)] px-2 py-0.5 rounded border border-[var(--tt-border)] w-fit">ID: {c.tool_use_id}</div>
+              <pre className="bg-[var(--tt-sunken)] text-[var(--tt-success-fg)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)]">
                 {typeof c.content === 'string' ? c.content : JSON.stringify(c.content, null, 2)}
               </pre>
             </div>
@@ -1295,15 +1340,15 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const textContent = Array.isArray(message.content) ? extractText(message.content) : (typeof message.content === 'string' ? message.content : "");
     if (textContent && mode !== "brain") {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <User size={16} strokeWidth={3} /> User Prompt
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{textContent}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{textContent}</div>
         </div>
       );
     }
@@ -1320,20 +1365,20 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
          const body = t.thinking || t.text || t.content || "";
          const isEncrypted = !body && (t.signature || t.type === "redacted_thinking");
          parts.push(
-            <div key={`think-${i}`} className="bg-amber-500/5 border border-amber-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-amber-500/50 group">
+            <div key={`think-${i}`} className="bg-amber-500/5 border border-amber-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-amber-500/50 group">
               <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-2 text-amber-500 font-bold text-xs uppercase tracking-widest">
-                  <Brain size={16} /> Reasoning {isEncrypted && <span className="text-[9px] font-mono normal-case tracking-normal text-amber-500/70 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">encrypted</span>}
+                <div className="flex items-center gap-2 text-[var(--tt-warn-fg)] font-bold text-xs uppercase tracking-widest">
+                  <Brain size={16} /> Reasoning {isEncrypted && <span className="text-[9px] font-mono normal-case tracking-normal text-[var(--tt-warn-fg)]/70 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/30">encrypted</span>}
                 </div>
                 {renderTimestamp()}
               </div>
               {isEncrypted ? (
-                <div className="text-slate-500 italic text-[11px] leading-relaxed">
+                <div className="text-[var(--tt-fg-dim)] italic text-[11px] leading-relaxed">
                   Extended thinking is sealed by the API — the local log stores only the cryptographic signature, not the reasoning text.
-                  <div className="mt-2 text-[9px] font-mono text-slate-600 break-all opacity-60">sig: {String(t.signature || "").slice(0, 64)}…</div>
+                  <div className="mt-2 text-[9px] font-mono text-[var(--tt-fg-faint)] break-all opacity-60">sig: {String(t.signature || "").slice(0, 64)}…</div>
                 </div>
               ) : (
-                <div className="text-slate-400 whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{body || JSON.stringify(t)}</div>
+                <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{body || JSON.stringify(t)}</div>
               )}
             </div>
          );
@@ -1342,10 +1387,10 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
 
     if (text && mode !== "brain") {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-emerald-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-success-fg)] font-black text-[10px] uppercase tracking-[0.2em]">
                 <MessageSquare size={16} strokeWidth={3} /> Response
             </div>
             {renderTimestamp()}
@@ -1358,14 +1403,14 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     if (toolCallsArr.length > 0 && mode !== "dialogue") {
       toolCallsArr.forEach((toolUse: any, i: number) => {
         parts.push(
-          <div key={`tool-${i}`} className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-blue-500/50 group">
+          <div key={`tool-${i}`} className="bg-blue-500/5 border border-blue-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-blue-500/50 group">
             <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-2 text-blue-400 font-bold text-xs uppercase tracking-widest">
+              <div className="flex items-center gap-2 text-[var(--tt-brand)] font-bold text-xs uppercase tracking-widest">
                 <Code size={16} /> Tool Call: {toolUse.name}
               </div>
               {renderTimestamp()}
             </div>
-            <pre className="bg-slate-950 text-blue-300 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner">
+            <pre className="bg-[var(--tt-sunken)] text-[var(--tt-brand)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)]">
               {JSON.stringify(toolUse.input || toolUse.args || toolUse.payload, null, 2)}
             </pre>
           </div>
@@ -1381,14 +1426,14 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     
     if (itemType === "reasoning" && mode !== "dialogue") {
        parts.push(
-          <div className="bg-purple-500/5 border border-purple-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-purple-500/50 group">
+          <div className="bg-purple-500/5 border border-purple-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-purple-500/50 group">
             <div className="flex justify-between items-start mb-3">
-              <div className="flex items-center gap-2 text-purple-400 font-bold mb-3 text-xs uppercase tracking-widest">
+              <div className="flex items-center gap-2 text-[var(--tt-violet-fg)] font-bold mb-3 text-xs uppercase tracking-widest">
                 <Brain size={16} /> Reasoning
               </div>
               {renderTimestamp()}
             </div>
-            <div className="text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{
+            <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80">{
               Array.isArray(payload.content)
                 ? payload.content.map((c: any) => c?.text ?? c?.summary ?? c?.content ?? (typeof c === 'string' ? c : "")).filter(Boolean).join("\n\n")
                 : (typeof payload.content === 'string' ? payload.content : (payload.summary ?? payload.text ?? ""))
@@ -1399,14 +1444,14 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
 
     if ((itemType === "function_call" || itemType === "tool_use") && mode !== "dialogue") {
        parts.push(
-          <div className="bg-blue-500/5 border border-blue-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-blue-500/50 group">
+          <div className="bg-blue-500/5 border border-blue-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-blue-500/50 group">
             <div className="flex justify-between items-start mb-4">
-              <div className="flex items-center gap-2 text-blue-400 font-bold mb-4 text-xs uppercase tracking-widest">
+              <div className="flex items-center gap-2 text-[var(--tt-brand)] font-bold mb-4 text-xs uppercase tracking-widest">
                 <Code size={16} /> Tool Call: {payload.name}
               </div>
               {renderTimestamp()}
             </div>
-            <pre className="bg-slate-950 text-blue-300 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner">
+            <pre className="bg-[var(--tt-sunken)] text-[var(--tt-brand)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)]">
               {(() => {
                 const raw = payload.arguments || payload.input || payload.parameters;
                 if (typeof raw === "string") { try { return JSON.stringify(JSON.parse(raw), null, 2); } catch { return raw; } }
@@ -1430,10 +1475,10 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
          const isAssistant = role === "assistant";
          if (mode !== "brain") {
            parts.push(
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+              <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
                 <div className={`absolute top-0 left-0 w-1 h-full ${isAssistant ? 'bg-emerald-600' : 'bg-blue-600'}`}></div>
                 <div className="flex justify-between items-start mb-4">
-                  <div className={`flex items-center gap-2 ${isAssistant ? 'text-emerald-400' : 'text-blue-400'} font-black text-[10px] uppercase tracking-[0.2em]`}>
+                  <div className={`flex items-center gap-2 ${isAssistant ? 'text-[var(--tt-success-fg)]' : 'text-[var(--tt-brand)]'} font-black text-[10px] uppercase tracking-[0.2em]`}>
                       {isAssistant ? <MessageSquare size={16} strokeWidth={3} /> : <User size={16} strokeWidth={3} />}
                       {isAssistant ? 'Response' : 'User Prompt'}
                   </div>
@@ -1441,7 +1486,7 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
                 </div>
                 {isAssistant
                   ? <ResponseBody text={text} />
-                  : <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{text}</div>}
+                  : <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{text}</div>}
               </div>
            );
          }
@@ -1455,23 +1500,23 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
 
     if (msgType === "user_message" && payload?.message && mode !== "brain") {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-brand)] font-black text-[10px] uppercase tracking-[0.2em]">
               <User size={16} strokeWidth={3} /> User Prompt
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.message}</div>
+          <div className="text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium">{payload.message}</div>
         </div>
       );
     } else if (msgType === "agent_message" && payload?.message && mode !== "brain") {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden group hover:border-slate-600 transition-all text-left">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
           <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-emerald-400 font-black text-[10px] uppercase tracking-[0.2em]">
+            <div className="flex items-center gap-2 text-[var(--tt-success-fg)] font-black text-[10px] uppercase tracking-[0.2em]">
               <MessageSquare size={16} strokeWidth={3} /> Agent Response
             </div>
             {renderTimestamp()}
@@ -1481,22 +1526,22 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
       );
     } else if (msgType === "agent_reasoning" && payload?.text && mode !== "dialogue") {
       parts.push(
-        <div className="bg-purple-500/5 border border-purple-500/20 rounded-2xl p-6 shadow-sm ml-4 border-l-4 border-l-purple-500/50 group">
+        <div className="bg-purple-500/5 border border-purple-500/20 rounded-[var(--tt-radius)] p-6 ml-4 border-l-4 border-l-purple-500/50 group">
           <div className="flex justify-between items-start mb-3">
-            <div className="flex items-center gap-2 text-purple-400 font-bold text-xs uppercase tracking-widest">
+            <div className="flex items-center gap-2 text-[var(--tt-violet-fg)] font-bold text-xs uppercase tracking-widest">
               <Brain size={16} /> Reasoning
             </div>
             {renderTimestamp()}
           </div>
-          <div className="text-slate-400 whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{payload.text}</div>
+          <div className="text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-[11px] leading-relaxed font-mono opacity-80">{payload.text}</div>
         </div>
       );
     } else if (msgType !== "user_message" && msgType !== "agent_message" && msgType !== "agent_reasoning" && msgType !== "token_count") {
       // Generic event_msg badge (skip token_count noise)
       parts.push(
-        <div className="bg-slate-900/30 border border-slate-800/50 rounded-xl p-4 text-[10px] text-slate-500 flex items-center gap-4 group hover:bg-slate-800/20 transition-all">
-          <Zap size={14} className="text-purple-500/50 group-hover:text-purple-400" />
-          <span className="font-bold text-slate-400 uppercase tracking-[0.2em]">{msgType}</span>
+        <div className="bg-[var(--tt-panel)]/40 border border-[var(--tt-border)] rounded-xl p-4 text-[10px] text-[var(--tt-fg-dim)] flex items-center gap-4 group hover:tt-tint-2/20 transition-all">
+          <Zap size={14} className="text-[var(--tt-violet-fg)]/50 group-hover:text-[var(--tt-violet-fg)]" />
+          <span className="font-bold text-[var(--tt-fg-muted)] uppercase tracking-[0.2em]">{msgType}</span>
         </div>
       );
     }
@@ -1507,14 +1552,14 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
     const output = payload.output;
     if (output !== undefined && output !== null) {
       parts.push(
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl ml-8 group hover:border-emerald-500/30 transition-all">
+        <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-5 ml-8 group hover:border-emerald-500/30 transition-all">
           <div className="flex justify-between items-start mb-4">
-            <div className="flex items-center gap-2 text-slate-500 font-bold text-xs uppercase tracking-widest group-hover:text-emerald-500">
+            <div className="flex items-center gap-2 text-[var(--tt-fg-dim)] font-bold text-xs uppercase tracking-widest group-hover:text-[var(--tt-success-fg)]">
               <Terminal size={16} /> Tool Output
             </div>
             {renderTimestamp()}
           </div>
-          <pre className="bg-slate-950 text-emerald-400 p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-slate-800 shadow-inner max-h-48 overflow-y-auto">
+          <pre className="bg-[var(--tt-sunken)] text-[var(--tt-success-fg)] p-5 rounded-xl text-[11px] overflow-x-auto font-mono border border-[var(--tt-border)] max-h-48 overflow-y-auto">
             {typeof output === "string" ? output.slice(0, 2000) : JSON.stringify(output, null, 2).slice(0, 2000)}
           </pre>
         </div>
@@ -1525,18 +1570,18 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
   // 11. SYSTEM METADATA
   if (type === "session_meta") {
     parts.push(
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl opacity-90 border-dashed">
-        <div className="flex items-center gap-2 text-slate-400 font-bold mb-4 text-xs uppercase tracking-widest">
+      <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-5 opacity-90 border-dashed">
+        <div className="flex items-center gap-2 text-[var(--tt-fg-muted)] font-bold mb-4 text-xs uppercase tracking-widest">
           <Info size={16} /> Session Metadata
         </div>
-        <div className="grid grid-cols-2 gap-6 text-[11px] font-mono text-slate-500">
+        <div className="grid grid-cols-2 gap-6 text-[11px] font-mono text-[var(--tt-fg-dim)]">
            <div className="flex flex-col gap-1">
               <span className="text-[8px] uppercase tracking-widest opacity-50">CWD</span>
-              <span className="text-slate-300 truncate">{payload.cwd}</span>
+              <span className="text-[var(--tt-fg)] truncate">{payload.cwd}</span>
            </div>
            <div className="flex flex-col gap-1">
               <span className="text-[8px] uppercase tracking-widest opacity-50">Model</span>
-              <span className="text-slate-300">{payload.model_provider}</span>
+              <span className="text-[var(--tt-fg)]">{payload.model_provider}</span>
            </div>
         </div>
       </div>
@@ -1545,7 +1590,7 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
 
   if (parts.length === 0 && mode === "all") {
     parts.push(
-      <div className="bg-slate-900/20 border border-slate-800/30 rounded-xl p-3 text-[10px] text-slate-600 flex justify-between items-center opacity-40 hover:opacity-100 transition-opacity">
+      <div className="bg-[var(--tt-panel)]/30 border border-[var(--tt-border)] rounded-xl p-3 text-[10px] text-[var(--tt-fg-faint)] flex justify-between items-center opacity-40 hover:opacity-100 transition-opacity">
         <span className="font-mono">System Event: {type}</span>
       </div>
     );
@@ -1557,12 +1602,12 @@ function ResponseBody({ text, tone = "default" }: { text: string; tone?: "defaul
   const [mode, setMode] = useState<"md" | "raw">("md");
   if (!text) return null;
   const base = tone === "muted"
-    ? "text-slate-400 whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80"
-    : "text-slate-200 whitespace-pre-wrap text-sm leading-relaxed font-medium";
+    ? "text-[var(--tt-fg-muted)] whitespace-pre-wrap italic text-xs leading-relaxed font-mono opacity-80"
+    : "text-[var(--tt-fg)] whitespace-pre-wrap text-sm leading-relaxed font-medium";
   return (
     <div className="relative group/body">
       {mode === "md" ? (
-        <div className="prose prose-invert prose-sm max-w-none text-slate-200 text-sm leading-relaxed">
+        <div className="prose prose-sm max-w-none text-[var(--tt-fg)] text-sm leading-relaxed">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
         </div>
       ) : (
@@ -1570,7 +1615,7 @@ function ResponseBody({ text, tone = "default" }: { text: string; tone?: "defaul
       )}
       <button
         onClick={(e) => { e.stopPropagation(); setMode(mode === "md" ? "raw" : "md"); }}
-        className="absolute -bottom-2 -right-2 text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg bg-slate-900/80 backdrop-blur-md border border-slate-800 text-slate-500 hover:text-blue-400 hover:border-blue-500/50 transition-all opacity-0 group-hover/body:opacity-100 shadow-xl z-10"
+        className="absolute -bottom-2 -right-2 text-[8px] font-semibold uppercase tracking-[0.16em] px-2 py-1 rounded-lg bg-[var(--tt-panel)]/80 backdrop-blur-md border border-[var(--tt-border)] text-[var(--tt-fg-dim)] hover:text-[var(--tt-brand)] hover:border-blue-500/50 transition-all opacity-0 group-hover/body:opacity-100 z-10"
         title={mode === "md" ? "Show raw text" : "Render markdown"}
       >
         {mode === "md" ? "View Raw" : "View MD"}

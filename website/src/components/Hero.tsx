@@ -6,11 +6,11 @@ import TerminalReplay from "./TerminalReplay";
 const PAINS = [
   "Why did that Codex run cost $4.20?",
   "Which agent actually finished the task?",
-  "What was Claude thinking for 40 seconds?",
+  "What was Claude Code thinking for 40 seconds?",
 ];
 
 const INSTALL: Record<"mac" | "windows", string> = {
-  mac: `curl -fsSL https://raw.githubusercontent.com/VasiHemanth/tokentelemetry/main/install.sh | bash`,
+  mac:     `curl -fsSL https://raw.githubusercontent.com/VasiHemanth/tokentelemetry/main/install.sh | bash`,
   windows: `irm https://raw.githubusercontent.com/VasiHemanth/tokentelemetry/main/install.ps1 | iex`,
 };
 
@@ -30,72 +30,104 @@ export default function Hero() {
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const tabClass = (active: boolean) =>
-    `px-3 py-1 rounded-md text-[11px] font-bold transition-colors ${
-      active ? "bg-slate-800 text-white" : "text-slate-500 hover:text-slate-300"
-    }`;
-
   return (
-    <section className="relative overflow-hidden bg-grid">
-      <div className="absolute inset-0 bg-gradient-to-b from-blue-500/5 via-transparent to-transparent pointer-events-none" />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 sm:pt-20 pb-16 sm:pb-24 grid lg:grid-cols-2 gap-10 lg:gap-12 items-center relative">
-        <div className="min-w-0">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-6">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-glow" />
-            100% local · open source
-          </div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white tracking-tighter leading-[1.05] mb-6 break-words">
-            Token usage & cost monitoring for{" "}
-            <span className="bg-gradient-to-r from-blue-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">
-              AI coding agents
-            </span>
-          </h1>
-          <p className="text-slate-400 text-base sm:text-lg mb-2 max-w-xl leading-relaxed">
-            Claude Code, Codex, Gemini, Cursor, Copilot — see exactly what they cost, think, and do. One command, no signup.
-          </p>
-          <p className="text-slate-500 text-sm sm:text-base font-mono italic mb-8 sm:mb-10 transition-all">
-            &ldquo;{PAINS[pain]}&rdquo;
-          </p>
+    <section className="relative overflow-hidden">
+      <div className="max-w-[1320px] mx-auto px-5 sm:px-8 pt-16 sm:pt-24 pb-10 sm:pb-16">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-12 lg:items-center">
+          {/* Left column — copy + install */}
+          <div className="lg:text-left text-center">
+            {/* Eyebrow */}
+            <div className="flex lg:justify-start justify-center mb-6">
+              <span className="inline-flex items-center gap-2 px-2.5 h-7 rounded-full text-[11px] font-medium tracking-tight text-[var(--tt-fg-muted)] bg-[var(--tt-panel)] border border-[var(--tt-border)]">
+                <span className="relative flex w-1.5 h-1.5">
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
+                </span>
+                100% local
+                <span className="text-[var(--tt-fg-faint)]">·</span>
+                open source
+                <span className="text-[var(--tt-fg-faint)]">·</span>
+                MIT
+              </span>
+            </div>
 
-          <div className="flex items-center gap-1 mb-2">
-            <button onClick={() => setOs("mac")} className={tabClass(os === "mac")}>macOS / Linux</button>
-            <button onClick={() => setOs("windows")} className={tabClass(os === "windows")}>Windows</button>
-          </div>
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-1 flex items-center gap-1 shadow-xl mb-3 min-w-0">
-            <pre className="flex-1 min-w-0 px-3 sm:px-4 py-3 font-mono text-[11px] sm:text-[12px] text-slate-300 overflow-x-auto whitespace-nowrap scrollbar-thin">
-              {INSTALL[os]}
-            </pre>
-            <button
-              onClick={copy}
-              className="m-1 px-2.5 sm:px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors flex items-center gap-1.5 text-xs font-bold shrink-0"
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-              <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
-            </button>
-          </div>
-          <p className="text-[11px] text-slate-600 font-mono">
-            <span className="text-slate-500">MIT licensed · runs offline · </span>requires Node 18+, Python 3.9+
-          </p>
+            {/* Headline */}
+            <h1 className="text-[40px] sm:text-[52px] lg:text-[58px] xl:text-[64px] leading-[1.04] tracking-[-0.025em] font-semibold text-[var(--tt-fg)] mb-5 max-w-4xl mx-auto lg:mx-0">
+              See exactly what your{" "}
+              <span className="text-[var(--tt-brand)]">coding agents</span>{" "}
+              cost, think, and do.
+            </h1>
 
-          <div className="flex flex-wrap items-center gap-3 mt-8">
-            <a
-              href="https://github.com/VasiHemanth/tokentelemetry"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-lg bg-white text-slate-950 font-bold text-sm hover:bg-slate-200 transition-colors"
-            >
-              <GitBranch size={16} /> View on GitHub
-            </a>
-            <a
-              href="#features"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-lg border border-slate-800 text-slate-300 hover:border-slate-600 hover:text-white font-bold text-sm transition-colors"
-            >
-              See it in action <ArrowRight size={14} />
-            </a>
+            {/* Subhead */}
+            <p className="text-[15px] sm:text-[17px] text-[var(--tt-fg-muted)] max-w-2xl mx-auto lg:mx-0 leading-relaxed mb-3">
+              Local, read-only observability for Claude Code, Codex, Gemini CLI, Cursor, Copilot, Antigravity,
+              Qwen CLI, OpenCode, and Vibe — one command, no signup, nothing leaves your machine.
+            </p>
+            <p className="text-[13px] sm:text-[14px] text-[var(--tt-fg-dim)] font-mono italic mb-9 transition-opacity">
+              &ldquo;{PAINS[pain]}&rdquo;
+            </p>
+
+            {/* Install + CTAs */}
+            <div className="max-w-2xl mx-auto lg:mx-0">
+              <div className="flex lg:justify-start justify-center items-center gap-1 mb-2 text-[11px]">
+                {(["mac", "windows"] as const).map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setOs(k)}
+                    className={`h-7 px-3 rounded-md font-medium tracking-tight transition-colors ${
+                      os === k
+                        ? "tt-tint-2 text-[var(--tt-fg)]"
+                        : "text-[var(--tt-fg-dim)] hover:text-[var(--tt-fg)]"
+                    }`}
+                  >
+                    {k === "mac" ? "macOS / Linux" : "Windows"}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 rounded-[var(--tt-radius-lg)] border border-[var(--tt-border)] bg-[var(--tt-sunken)] p-1">
+                <pre className="flex-1 min-w-0 px-3 sm:px-4 py-2.5 font-mono text-[12px] sm:text-[13px] text-[var(--tt-fg)] overflow-x-auto whitespace-nowrap">
+                  <span className="text-[var(--tt-fg-faint)] select-none mr-2">$</span>{INSTALL[os]}
+                </pre>
+                <button
+                  onClick={copy}
+                  className="m-1 inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--tt-radius)] tt-tint-2 hover:tt-tint-3 text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] text-[11px] font-medium transition-colors shrink-0"
+                  aria-label={copied ? "Copied" : "Copy install command"}
+                >
+                  {copied ? <Check size={13} /> : <Copy size={13} />}
+                  <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-[var(--tt-fg-dim)] font-mono lg:text-left text-center">
+                MIT licensed · runs offline · requires Node 18+, Python 3.9+
+              </p>
+
+              <div className="mt-6 flex flex-wrap items-center lg:justify-start justify-center gap-2">
+                <a
+                  href="https://github.com/VasiHemanth/tokentelemetry"
+                  target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-[var(--tt-radius)] bg-[var(--tt-brand-strong)] hover:bg-[var(--tt-brand)] text-white font-medium text-[13px] shadow-[0_8px_24px_-12px_var(--tt-brand-glow)] transition-colors"
+                >
+                  <GitBranch size={14} /> View on GitHub
+                </a>
+                <a
+                  href="#features"
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-[var(--tt-radius)] tt-tint-1 hover:tt-tint-2 text-[var(--tt-fg)] border border-[var(--tt-border-strong)] font-medium text-[13px] transition-colors"
+                >
+                  See it in action <ArrowRight size={14} />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Right column — animated terminal (desktop only) */}
+          <div className="hidden lg:block relative">
+            <div aria-hidden className="absolute -inset-x-6 -top-8 -bottom-8 pointer-events-none bg-gradient-to-tr from-[color:var(--tt-brand-glow)] via-transparent to-transparent blur-3xl" />
+            <div className="relative">
+              <TerminalReplay />
+            </div>
           </div>
         </div>
 
-        <div className="lg:pl-8 min-w-0 w-full">
-          <TerminalReplay />
-        </div>
       </div>
     </section>
   );

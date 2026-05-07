@@ -1,372 +1,386 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
-import { Activity, BarChart3, PieChart, TrendingUp, Zap, Info, DollarSign, MousePointer2, Cpu } from "lucide-react";
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  Cell, PieChart as RePieChart, Pie, AreaChart, Area, Legend
+import { useMemo } from "react";
+import {
+  BarChart3, TrendingUp, ArrowDownToLine, ArrowUpFromLine,
+  Zap, DollarSign, Cpu,
+} from "lucide-react";
+import {
+  AreaChart, Area, BarChart, Bar, PieChart as RePieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
+import { useResource } from "@/lib/api";
+import { getAgent } from "@/lib/agents";
+import { useTheme } from "@/components/ThemeProvider";
+import {
+  PageHeader, StatTile, Section, Card, CardHeader, CardTitle, CardEyebrow,
+  Table, THead, TBody, TR, TH, TD, AgentBadge, Badge, EmptyState, Skeleton,
+} from "@/components/ui";
+
 interface AnalyticsData {
-  by_agent: Record<string, {
-    input: number;
-    output: number;
-    cached: number;
-    total: number;
-    cost: number;
-    session_count: number;
-  }>;
-  by_day: {
-    date: string;
-    total: number;
-    input: number;
-    output: number;
-    cached: number;
-    cost: number;
-  }[];
-  by_model?: Record<string, {
-    input: number;
-    output: number;
-    cached: number;
-    total: number;
-    cost: number;
-    session_count: number;
-    agent: string;
-  }>;
-  total: {
-    input: number;
-    output: number;
-    cached: number;
-    total: number;
-    cost: number;
-  };
+  by_agent: Record<string, AgentStats>;
+  by_day: { date: string; total: number; input: number; output: number; cached: number; cost: number }[];
+  by_model?: Record<string, AgentStats & { agent: string }>;
+  total: { input: number; output: number; cached: number; total: number; cost: number };
   pricing_updated?: string;
 }
 
-const AGENT_COLORS: Record<string, string> = {
-  claude: "#f97316",       // Orange
-  codex: "#a855f7",        // Purple
-  gemini: "#06b6d4",       // Cyan
-  antigravity: "#10b981",  // Emerald
-  qwen: "#3b82f6",         // Blue
-  vibe: "#f472b6",         // Pink
-  copilot: "#6366f1",      // Indigo
-  cursor: "#3b82f6",       // Blue
-  opencode: "#f59e0b"      // Amber
-};
+interface AgentStats {
+  input: number; output: number; cached: number; total: number; cost: number; session_count: number;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Recharts theme — picks values per active theme. Recharts can't read
+   CSS vars from `stroke` attrs, so we resolve them in JS.
+   ────────────────────────────────────────────────────────────────────────── */
+function useChartTheme() {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  return {
+    axisStroke: isDark ? "rgba(255,255,255,0.18)" : "rgba(15,23,42,0.32)",
+    tickFill:   isDark ? "rgba(255,255,255,0.55)" : "rgba(15,23,42,0.65)",
+    grid:       isDark ? "rgba(255,255,255,0.05)" : "rgba(15,23,42,0.07)",
+    tooltipStyle: {
+      backgroundColor: "var(--tt-overlay)",
+      border: "1px solid var(--tt-border-strong)",
+      borderRadius: "10px",
+      padding: "8px 10px",
+      boxShadow: isDark ? "0 12px 32px -12px rgba(0,0,0,0.6)" : "0 12px 32px -12px rgba(15,23,42,0.18)",
+    },
+    tooltipItem:  { fontSize: "11px", color: "var(--tt-fg)" },
+    tooltipLabel: { fontSize: "10px", color: "var(--tt-fg-dim)", textTransform: "uppercase" as const, letterSpacing: "0.16em" },
+  };
+}
 
 export default function AnalyticsPage() {
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch("http://127.0.0.1:8000/analytics")
-      .then((res) => res.json())
-      .then((data) => {
-        setData(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch analytics:", err);
-        setLoading(false);
-      });
-  }, []);
+  const { data, loading } = useResource<AnalyticsData>("/analytics", { pollMs: 30_000 });
+  const ct = useChartTheme();
+  const AXIS = { stroke: ct.axisStroke, fontSize: 10, tickLine: false, axisLine: false, tick: { fill: ct.tickFill } } as const;
 
   const modelData = useMemo(() => {
     if (!data?.by_model) return [];
     return Object.entries(data.by_model)
-      .map(([name, s]) => ({ name, ...s, color: AGENT_COLORS[s.agent] || "#3b82f6" }))
+      .map(([name, s]) => ({ name, ...s, color: getAgent(s.agent).hex }))
       .sort((a, b) => b.total - a.total);
   }, [data]);
 
   const agentData = useMemo(() => {
     if (!data) return [];
-    return Object.entries(data.by_agent).map(([name, stats]) => ({
-      name: name.charAt(0).toUpperCase() + name.slice(1),
-      value: stats.total,
-      color: AGENT_COLORS[name] || "#3b82f6"
-    }));
+    return Object.entries(data.by_agent)
+      .map(([name, s]) => ({ key: name, name: getAgent(name).label, value: s.total, color: getAgent(name).hex }))
+      .sort((a, b) => b.value - a.value);
   }, [data]);
 
-  if (loading) {
+  if (loading && !data) return <AnalyticsLoading />;
+  if (!data) {
     return (
-      <div className="p-12 text-center text-slate-500">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-        Calculating token metrics...
+      <div className="px-8 py-8 max-w-[1600px] mx-auto">
+        <EmptyState
+          icon={<BarChart3 size={20} />}
+          title="No analytics data"
+          description="Once agent sessions are recorded, this view will surface token consumption, cost, and cache efficiency across agents and models."
+        />
       </div>
     );
   }
 
-  if (!data) return null;
+  const cacheEff = ((data.total.cached / Math.max(1, data.total.input + data.total.cached)) * 100);
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-10 pb-20">
-      <header>
-        <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-          <BarChart3 className="text-blue-500" size={32} />
-          Token Analytics
-        </h1>
-        <p className="text-slate-400 mt-2">In-depth analysis of agent consumption and efficiency.</p>
-      </header>
+    <div className="px-8 py-8 max-w-[1600px] mx-auto space-y-10 pb-20">
+      <PageHeader
+        eyebrow="Analytics"
+        title="Token analytics"
+        description="In-depth analysis of agent consumption, cost, and cache efficiency."
+        icon={<BarChart3 size={20} strokeWidth={2.25} />}
+        actions={
+          data.pricing_updated && (
+            <Badge variant="outline" size="sm" className="h-9">
+              <DollarSign size={11} /> Rates · {data.pricing_updated}
+            </Badge>
+          )
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-         <MetricCard title="Total Tokens" value={data.total.total.toLocaleString()} subValue="Overall across all agents" icon={<TrendingUp className="text-blue-400" />} />
-         <MetricCard title="Input Tokens" value={data.total.input.toLocaleString()} subValue={`${((data.total.input / Math.max(1, data.total.total)) * 100).toFixed(1)}% of total`} icon={<MousePointer2 className="text-emerald-400" />} />
-         <MetricCard title="Est. Lifetime Cost" value={`$${data.total.cost.toFixed(2)}`} subValue={data.pricing_updated ? `Rates updated ${data.pricing_updated}` : "Based on actual model rates"} icon={<DollarSign className="text-amber-400" />} />
-         <MetricCard title="Cache Efficiency" value={`${((data.total.cached / Math.max(1, (data.total.input + data.total.cached))) * 100).toFixed(1)}%`} subValue="Tokens saved via caching" icon={<Zap className="text-cyan-400" />} />
+      {/* KPI strip */}
+      <Section title="Totals">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatTile
+            label="Total tokens"
+            value={data.total.total.toLocaleString()}
+            hint="Across all agents"
+            icon={<TrendingUp size={16} />}
+            accent="var(--tt-brand)"
+          />
+          <StatTile
+            label="Input"
+            value={compact(data.total.input)}
+            hint={`${pct(data.total.input, data.total.total)}% of total`}
+            icon={<ArrowDownToLine size={16} />}
+            accent="var(--tt-info)"
+          />
+          <StatTile
+            label="Output"
+            value={compact(data.total.output)}
+            hint={`${pct(data.total.output, data.total.total)}% of total`}
+            icon={<ArrowUpFromLine size={16} />}
+            accent="var(--tt-success)"
+          />
+          <StatTile
+            label="Cache efficiency"
+            value={`${cacheEff.toFixed(1)}%`}
+            hint={`${compact(data.total.cached)} cached · est. $${data.total.cost.toFixed(2)} cost`}
+            icon={<Zap size={16} />}
+            accent="var(--tt-warn)"
+          />
+        </div>
+      </Section>
+
+      {/* Daily consumption + agent share */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2" padding="lg">
+          <CardHeader>
+            <CardTitle><TrendingUp size={14} className="text-[var(--tt-brand)]" /> Token consumption (daily)</CardTitle>
+            <CardEyebrow>{data.by_day.length} days</CardEyebrow>
+          </CardHeader>
+          <div className="h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={data.by_day} margin={{ top: 10, right: 16, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="ttArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#60a5fa" stopOpacity={0.45} />
+                    <stop offset="100%" stopColor="#60a5fa" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke={ct.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" {...AXIS} />
+                <YAxis tickFormatter={(v) => compact(v)} {...AXIS} width={42} />
+                <Tooltip
+                  contentStyle={ct.tooltipStyle}
+                  itemStyle={ct.tooltipItem}
+                  labelStyle={ct.tooltipLabel}
+                  formatter={(v: number) => [v.toLocaleString(), "Tokens"]}
+                  cursor={{ stroke: ct.axisStroke }}
+                />
+                <Area type="monotone" dataKey="total" stroke="#60a5fa" strokeWidth={2} fill="url(#ttArea)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card padding="lg">
+          <CardHeader>
+            <CardTitle><Cpu size={14} className="text-emerald-400" /> Agent share</CardTitle>
+            <CardEyebrow>{agentData.length} agents</CardEyebrow>
+          </CardHeader>
+          <div className="grid grid-cols-2 gap-4 items-center h-72">
+            <div className="h-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <RePieChart>
+                  <Pie data={agentData} innerRadius={56} outerRadius={84} paddingAngle={3} dataKey="value" stroke="none">
+                    {agentData.map((a) => <Cell key={a.key} fill={a.color} />)}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={ct.tooltipStyle}
+                    itemStyle={ct.tooltipItem}
+                    formatter={(v: number, _n, p) => [v.toLocaleString(), p.payload.name]}
+                  />
+                </RePieChart>
+              </ResponsiveContainer>
+            </div>
+            <ul className="space-y-2 max-h-full overflow-y-auto pr-1">
+              {agentData.map((a) => (
+                <li key={a.key} className="flex items-center justify-between gap-2 text-[11px]">
+                  <span className="flex items-center gap-2 text-[var(--tt-fg-muted)] min-w-0">
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: a.color }} />
+                    <span className="truncate">{a.name}</span>
+                  </span>
+                  <span className="tabular text-[var(--tt-fg-dim)] whitespace-nowrap">
+                    {pct(a.value, data.total.total)}%
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h2 className="text-lg font-bold text-white mb-6">Token Consumption (Daily)</h2>
-            <div className="h-72 w-full">
-               <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={data.by_day}>
-                     <defs>
-                        <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                           <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                           <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                        </linearGradient>
-                     </defs>
-                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                     <XAxis dataKey="date" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
-                     <YAxis stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`} />
-                     <Tooltip 
-                        contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }}
-                        itemStyle={{ fontSize: '12px' }}
-                     />
-                     <Area type="monotone" dataKey="total" stroke="#3b82f6" fillOpacity={1} fill="url(#colorTotal)" strokeWidth={2} />
-                  </AreaChart>
-               </ResponsiveContainer>
-            </div>
-         </div>
-
-         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-            <h2 className="text-lg font-bold text-white mb-6">Distribution by Agent</h2>
-            <div className="flex h-72 items-center">
-               <div className="w-1/2 h-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                     <RePieChart>
-                        <Pie
-                           data={agentData}
-                           innerRadius={60}
-                           outerRadius={80}
-                           paddingAngle={5}
-                           dataKey="value"
-                        >
-                           {agentData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                           ))}
-                        </Pie>
-                        <Tooltip />
-                     </RePieChart>
-                  </ResponsiveContainer>
-               </div>
-               <div className="w-1/2 space-y-4">
-                  {agentData.map(agent => (
-                     <div key={agent.name} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: agent.color }}></div>
-                           <span className="text-sm text-slate-300">{agent.name}</span>
-                        </div>
-                        <span className="text-sm font-mono text-slate-500">{((agent.value / Math.max(1, data.total.total)) * 100).toFixed(1)}%</span>
-                     </div>
-                  ))}
-               </div>
-            </div>
-         </div>
-      </div>
-
-      <section className="bg-slate-900 rounded-2xl shadow-xl border border-slate-800 overflow-hidden">
-        <div className="p-6 border-b border-slate-800 bg-slate-900/50">
-          <h2 className="text-xl font-semibold text-white">Agent-Specific Metrics</h2>
+      {/* Per-agent table */}
+      <Card padding="none">
+        <div className="px-5 py-4 border-b border-[var(--tt-border)] flex items-center justify-between">
+          <CardTitle><BarChart3 size={14} className="text-[var(--tt-brand)]" /> Agent breakdown</CardTitle>
+          <CardEyebrow>{Object.keys(data.by_agent).length} agents</CardEyebrow>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="text-slate-500 text-xs border-b border-slate-800 bg-slate-900/30 uppercase tracking-wider">
-                <th className="px-6 py-4 font-semibold">Agent</th>
-                <th className="px-6 py-4 font-semibold text-right">Sessions</th>
-                <th className="px-6 py-4 font-semibold text-right">Input</th>
-                <th className="px-6 py-4 font-semibold text-right">Output</th>
-                <th className="px-6 py-4 font-semibold text-right">Cached</th>
-                <th className="px-6 py-4 font-semibold text-right">Total Tokens</th>
-                <th className="px-6 py-4 font-semibold text-right text-amber-500">Cost</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {Object.entries(data.by_agent).map(([name, stats]) => (
-                <tr key={name} className="hover:bg-slate-800/50 transition-colors group">
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-tight ${
-                      name === 'claude' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 
-                      name === 'codex' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
-                      name === 'gemini' ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' :
-                      name === 'antigravity' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      name === 'qwen' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                      name === 'vibe' ? 'bg-pink-500/10 text-pink-400 border border-pink-500/20' :
-                      'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
-                    }`}>
-                      {name}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-slate-300 text-right font-mono">{stats.session_count}</td>
-                  <td className="px-6 py-4 text-sm text-slate-400 text-right font-mono">{stats.input.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm text-slate-400 text-right font-mono">{stats.output.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm text-cyan-400/70 text-right font-mono">{stats.cached.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm text-white text-right font-bold font-mono group-hover:text-blue-400 transition-colors">{stats.total.toLocaleString()}</td>
-                  <td className="px-6 py-4 text-sm text-amber-400 text-right font-bold font-mono group-hover:text-amber-300 transition-colors">${stats.cost.toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Table>
+            <THead>
+              <TR>
+                <TH className="pl-5">Agent</TH>
+                <TH className="text-right">Sessions</TH>
+                <TH className="text-right">Input</TH>
+                <TH className="text-right">Output</TH>
+                <TH className="text-right">Cached</TH>
+                <TH className="text-right">Total</TH>
+                <TH className="text-right pr-5 text-amber-300">Cost</TH>
+              </TR>
+            </THead>
+            <TBody>
+              {Object.entries(data.by_agent)
+                .sort((a, b) => b[1].total - a[1].total)
+                .map(([name, s]) => (
+                  <TR key={name} interactive>
+                    <TD className="pl-5"><AgentBadge agent={name} /></TD>
+                    <TD className="text-right tabular text-[var(--tt-fg-muted)]">{s.session_count}</TD>
+                    <TD className="text-right tabular text-[var(--tt-fg-muted)]">{s.input.toLocaleString()}</TD>
+                    <TD className="text-right tabular text-[var(--tt-fg-muted)]">{s.output.toLocaleString()}</TD>
+                    <TD className="text-right tabular text-cyan-300/80">{s.cached.toLocaleString()}</TD>
+                    <TD className="text-right tabular font-semibold text-[var(--tt-fg)]">{s.total.toLocaleString()}</TD>
+                    <TD className="text-right pr-5 tabular font-semibold text-amber-300">${s.cost.toFixed(2)}</TD>
+                  </TR>
+                ))}
+            </TBody>
+          </Table>
         </div>
-      </section>
+      </Card>
 
+      {/* Models */}
       {modelData.length > 0 && (
-        <section className="space-y-6">
-          <div className="flex items-center gap-3">
-            <Cpu className="text-emerald-400" size={22} />
-            <h2 className="text-xl font-bold text-white">Model-wise Analytics</h2>
-            <span className="text-[10px] font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">{modelData.length} models</span>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl overflow-hidden">
-              <h3 className="text-sm font-bold text-white mb-4">Tokens per Model</h3>
-              <div className="h-[500px] w-full min-h-[500px]">
-                <ResponsiveContainer width="99%" height="100%">
-                  <BarChart 
-                    data={modelData} 
-                    layout="vertical" 
-                    margin={{ left: 10, right: 40, top: 10, bottom: 10 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={false} />
-                    <XAxis 
-                      type="number" 
-                      stroke="#64748b" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false} 
-                      tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} 
+        <Section
+          title="Per-model"
+          description="Distinct models observed across agents — click a row to filter sessions (coming soon)."
+          actions={<Badge variant="neutral" size="sm">{modelData.length} models</Badge>}
+        >
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2" padding="lg">
+              <CardHeader>
+                <CardTitle><Cpu size={14} className="text-emerald-400" /> Tokens per model</CardTitle>
+              </CardHeader>
+              <div className="w-full" style={{ height: Math.max(280, modelData.length * 32 + 40) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={modelData} layout="vertical" margin={{ top: 4, right: 24, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke={ct.grid} strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tickFormatter={(v) => compact(v)} {...AXIS} />
+                    <YAxis
+                      type="category" dataKey="name" width={210} interval={0}
+                      tick={{ fill: "var(--tt-fg-muted)", fontSize: 11 }}
+                      tickLine={false} axisLine={false}
                     />
-                    <YAxis 
-                      type="category" 
-                      dataKey="name" 
-                      stroke="#94a3b8" 
-                      fontSize={10} 
-                      tickLine={false} 
-                      axisLine={false} 
-                      width={220}
-                      interval={0}
-                      tick={{ fill: '#94a3b8', fontSize: 10, width: 220 }}
+                    <Tooltip
+                      contentStyle={ct.tooltipStyle}
+                      itemStyle={ct.tooltipItem}
+                      cursor={{ fill: ct.grid }}
+                      formatter={(v: number) => [v.toLocaleString(), "Tokens"]}
                     />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} 
-                      itemStyle={{ fontSize: '12px' }}
-                      cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                    />
-                    <Bar dataKey="total" radius={[0, 4, 4, 0]} barSize={20}>
-                      {modelData.map((m, i) => <Cell key={i} fill={m.color} />)}
+                    <Bar dataKey="total" radius={[0, 6, 6, 0]} barSize={16}>
+                      {modelData.map((m) => <Cell key={m.name} fill={m.color} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            </div>
+            </Card>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
-              <h3 className="text-sm font-bold text-white mb-4">Model Share</h3>
-              <div className="flex h-72 items-center">
-                <div className="w-1/2 h-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RePieChart>
-                      <Pie 
-                        data={modelData} 
-                        innerRadius={55} 
-                        outerRadius={85} 
-                        paddingAngle={3} 
-                        dataKey="total"
-                        nameKey="name"
-                      >
-                        {modelData.map((m, i) => <Cell key={i} fill={m.color} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px' }} />
-                    </RePieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="w-1/2 space-y-2 max-h-full overflow-y-auto pr-2">
-                  {modelData.map((m) => (
-                    <div key={m.name} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: m.color }}></div>
-                        <span className="text-[11px] font-mono text-slate-300 truncate" title={m.name}>{m.name}</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-500 tabular-nums">{((m.total / Math.max(1, data.total.total)) * 100).toFixed(1)}%</span>
-                    </div>
-                  ))}
-                </div>
+            <Card padding="lg">
+              <CardHeader>
+                <CardTitle><Cpu size={14} className="text-emerald-400" /> Model share</CardTitle>
+              </CardHeader>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RePieChart>
+                    <Pie data={modelData} innerRadius={48} outerRadius={76} paddingAngle={2} dataKey="total" stroke="none">
+                      {modelData.map((m) => <Cell key={m.name} fill={m.color} />)}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={ct.tooltipStyle}
+                      itemStyle={ct.tooltipItem}
+                      formatter={(v: number, _n, p) => [v.toLocaleString(), p.payload.name]}
+                    />
+                  </RePieChart>
+                </ResponsiveContainer>
               </div>
-            </div>
+              <ul className="mt-3 space-y-2 max-h-56 overflow-y-auto pr-1">
+                {modelData.map((m) => (
+                  <li key={m.name} className="flex items-center justify-between gap-2 text-[11px]">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: m.color }} />
+                      <span className="font-mono text-[var(--tt-fg)] truncate" title={m.name}>{m.name}</span>
+                    </span>
+                    <span className="tabular text-[var(--tt-fg-dim)] whitespace-nowrap">
+                      {pct(m.total, data.total.total)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
           </div>
 
-          <div className="bg-slate-900 rounded-2xl shadow-xl border border-slate-800 overflow-hidden">
-            <div className="p-6 border-b border-slate-800 bg-slate-900/50">
-              <h3 className="text-lg font-semibold text-white">Per-Model Breakdown</h3>
+          <Card padding="none">
+            <div className="px-5 py-4 border-b border-[var(--tt-border)] flex items-center justify-between">
+              <CardTitle>Per-model breakdown</CardTitle>
+              <CardEyebrow>{modelData.length} models</CardEyebrow>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="text-slate-500 text-xs border-b border-slate-800 bg-slate-900/30 uppercase tracking-wider">
-                    <th className="px-6 py-4 font-semibold">Model</th>
-                    <th className="px-6 py-4 font-semibold">Agent</th>
-                    <th className="px-6 py-4 font-semibold text-right">Sessions</th>
-                    <th className="px-6 py-4 font-semibold text-right">Input</th>
-                    <th className="px-6 py-4 font-semibold text-right">Output</th>
-                    <th className="px-6 py-4 font-semibold text-right">Cached</th>
-                    <th className="px-6 py-4 font-semibold text-right">Total</th>
-                    <th className="px-6 py-4 font-semibold text-right text-amber-500">Cost</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
+              <Table>
+                <THead>
+                  <TR>
+                    <TH className="pl-5">Model</TH>
+                    <TH>Agent</TH>
+                    <TH className="text-right">Sessions</TH>
+                    <TH className="text-right">Input</TH>
+                    <TH className="text-right">Output</TH>
+                    <TH className="text-right">Cached</TH>
+                    <TH className="text-right">Total</TH>
+                    <TH className="text-right pr-5 text-amber-300">Cost</TH>
+                  </TR>
+                </THead>
+                <TBody>
                   {modelData.map((m) => (
-                    <tr key={m.name} className="hover:bg-slate-800/50 transition-colors group">
-                      <td className="px-6 py-4">
-                        <span className="flex items-center gap-2 text-[11px] font-mono text-emerald-400">
-                          <Cpu size={12} /> {m.name}
+                    <TR key={m.name} interactive>
+                      <TD className="pl-5">
+                        <span className="flex items-center gap-2 font-mono text-[12px] text-[var(--tt-fg)]">
+                          <Cpu size={12} className="text-emerald-400" /> {m.name}
                         </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-[10px] font-bold uppercase" style={{ color: m.color }}>{m.agent}</span>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-slate-300 text-right font-mono">{m.session_count}</td>
-                      <td className="px-6 py-4 text-sm text-slate-400 text-right font-mono">{m.input.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-sm text-slate-400 text-right font-mono">{m.output.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-sm text-cyan-400/70 text-right font-mono">{m.cached.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-sm text-white text-right font-bold font-mono group-hover:text-blue-400 transition-colors">{m.total.toLocaleString()}</td>
-                      <td className="px-6 py-4 text-sm text-amber-400 text-right font-bold font-mono group-hover:text-amber-300 transition-colors">${m.cost.toFixed(2)}</td>
-                    </tr>
+                      </TD>
+                      <TD><AgentBadge agent={m.agent} /></TD>
+                      <TD className="text-right tabular text-[var(--tt-fg-muted)]">{m.session_count}</TD>
+                      <TD className="text-right tabular text-[var(--tt-fg-muted)]">{m.input.toLocaleString()}</TD>
+                      <TD className="text-right tabular text-[var(--tt-fg-muted)]">{m.output.toLocaleString()}</TD>
+                      <TD className="text-right tabular text-cyan-300/80">{m.cached.toLocaleString()}</TD>
+                      <TD className="text-right tabular font-semibold text-[var(--tt-fg)]">{m.total.toLocaleString()}</TD>
+                      <TD className="text-right pr-5 tabular font-semibold text-amber-300">${m.cost.toFixed(2)}</TD>
+                    </TR>
                   ))}
-                </tbody>
-              </table>
+                </TBody>
+              </Table>
             </div>
-          </div>
-        </section>
+          </Card>
+        </Section>
       )}
     </div>
   );
 }
 
-function MetricCard({ title, value, subValue, icon }: { title: string; value: string; subValue: string; icon: React.ReactNode }) {
+function AnalyticsLoading() {
   return (
-    <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-lg relative overflow-hidden group hover:border-slate-700 transition-colors">
-      <div className="flex justify-between items-start mb-4">
-         <div className="p-2 bg-slate-950 rounded-lg border border-slate-800 group-hover:scale-110 transition-transform">{icon}</div>
+    <div className="px-8 py-8 max-w-[1600px] mx-auto space-y-10">
+      <Skeleton className="h-12 w-72" />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 w-full" />)}
       </div>
-      <div>
-         <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{title}</p>
-         <p className="text-2xl font-bold text-white tracking-tight">{value}</p>
-         <p className="text-[10px] text-slate-500 mt-1">{subValue}</p>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Skeleton className="h-80 lg:col-span-2" />
+        <Skeleton className="h-80" />
       </div>
     </div>
   );
+}
+
+function pct(part: number, whole: number) {
+  return ((part / Math.max(1, whole)) * 100).toFixed(1);
+}
+
+function compact(n: number) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+  return n.toLocaleString();
 }

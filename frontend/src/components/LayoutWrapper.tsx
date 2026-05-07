@@ -1,32 +1,37 @@
 "use client";
 
-import Navigation from "../components/Navigation";
-import { useState, useEffect } from "react";
+import Navigation from "./Navigation";
+import { useEffect, useState } from "react";
 
-export default function LayoutWrapper({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  // Initialize from localStorage if available
   useEffect(() => {
+    // URL override (e.g. ?sidebar=collapsed) wins over localStorage — useful for
+    // screenshots and embedded views.
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("sidebar");
+    if (fromUrl === "collapsed" || fromUrl === "expanded") {
+      setIsCollapsed(fromUrl === "collapsed");
+      return;
+    }
     const saved = localStorage.getItem("sidebar-collapsed");
     if (saved) setIsCollapsed(saved === "true");
   }, []);
 
-  const toggleCollapsed = (collapsed: boolean) => {
+  const toggle = (collapsed: boolean) => {
     setIsCollapsed(collapsed);
     localStorage.setItem("sidebar-collapsed", String(collapsed));
   };
 
   return (
-    <body className="min-h-full flex bg-slate-950 overflow-hidden">
-      <Navigation isCollapsed={isCollapsed} setIsCollapsed={toggleCollapsed} />
-      <main className="flex-1 overflow-y-auto h-screen relative">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.05),transparent)] pointer-events-none"></div>
-        {children}
+    <body className="min-h-full flex bg-[var(--tt-canvas)] overflow-hidden">
+      <Navigation isCollapsed={isCollapsed} setIsCollapsed={toggle} />
+      <main className="flex-1 h-screen overflow-y-auto relative">
+        {/* Ambient canvas — single source of background atmosphere */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 tt-canvas-glow" />
+        <div aria-hidden className="pointer-events-none absolute inset-0 tt-grid opacity-40" />
+        <div className="relative z-10">{children}</div>
       </main>
     </body>
   );
