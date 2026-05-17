@@ -10,6 +10,7 @@ import { useResource } from "@/lib/api";
 import { ALL_AGENT_KEYS, getAgent } from "@/lib/agents";
 import { cn } from "@/lib/cn";
 import { ThemeToggle } from "./ThemeToggle";
+import HermesIcon from "./icons/HermesIcon";
 
 interface NavigationProps {
   isCollapsed: boolean;
@@ -53,7 +54,12 @@ export default function Navigation({ isCollapsed, setIsCollapsed }: NavigationPr
 
       {/* Links */}
       <div className="space-y-0.5">
-        {LINKS.map((link) => {
+        {[
+          ...LINKS,
+          ...(availableAgents.includes("hermes")
+            ? [{ name: "Hermes Agent", href: "/hermes", icon: HermesIcon as typeof LayoutDashboard }]
+            : []),
+        ].map((link) => {
           const Icon = link.icon;
           const isActive = pathname === link.href || (link.href !== "/" && pathname.startsWith(link.href));
           return (

@@ -1,8 +1,10 @@
 # Token Telemetry (TokenTelemetry)
 
-> **Local token + cost monitoring dashboard for AI coding agents — Claude Code, Gemini CLI, Codex, Cursor, GitHub Copilot, OpenCode, and more.**
+> **Local observability for AI coding agents AND autonomous agents — Claude Code, Codex, Gemini CLI, Cursor, Copilot, Qwen, OpenCode, Vibe, Antigravity, _and_ Nous Research's Hermes Agent.**
 
 **Token Telemetry** (one word: **TokenTelemetry**) — free, open-source, 100% local.
+
+> ☤ **New:** Dedicated **[Hermes Agent](#hermes-agent-autonomous-observability)** dashboard — autonomous-agent observability across 38 platforms (CLI, Telegram, Discord, cron, webhook, …).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
@@ -25,38 +27,61 @@ AI coding agents like Claude Code, Gemini CLI, and Codex are powerful — but th
 
 TokenTelemetry answers all of that — locally, instantly, for free.
 
-| Problem | TokenTelemetry Solution |
-|---|---|
-| "How much did that Claude Code session cost?" | Real-time cost tracking per session/project |
-| "What tools did my agent call?" | Full waterfall trace of every tool call |
-| "Which model is most token-efficient for my codebase?" | Per-model analytics & comparisons |
-| "Did my agent follow its plan?" | Plan-mode capture & display |
-| "I use 3 different agents — unified view?" | Multi-agent dashboard in one place |
+| Problem                                                | TokenTelemetry Solution                     |
+| ------------------------------------------------------ | ------------------------------------------- |
+| "How much did that Claude Code session cost?"          | Real-time cost tracking per session/project |
+| "What tools did my agent call?"                        | Full waterfall trace of every tool call     |
+| "Which model is most token-efficient for my codebase?" | Per-model analytics & comparisons           |
+| "Did my agent follow its plan?"                        | Plan-mode capture & display                 |
+| "I use 3 different agents — unified view?"             | Multi-agent dashboard in one place          |
 
 ---
 
-## Supported AI Coding Agents
+## Supported Agents
 
-TokenTelemetry reads session logs from these agents automatically:
+TokenTelemetry reads session logs from these agents automatically.
 
-| Agent | Status |
-|---|---|
+### Coding agents
+
+| Agent                       | Status             |
+| --------------------------- | ------------------ |
 | **Claude Code** (Anthropic) | ✅ Fully supported |
-| **Gemini CLI** (Google) | ✅ Fully supported |
-| **OpenAI Codex CLI** | ✅ Fully supported |
-| **Cursor** | ✅ Fully supported |
-| **GitHub Copilot** | ✅ Fully supported |
-| **OpenCode** | ✅ Fully supported |
-| **Qwen** | ✅ Fully supported |
-| **Vibe** | ✅ Fully supported |
-| **Antigravity** | ✅ Fully supported |
+| **Gemini CLI** (Google)     | ✅ Fully supported |
+| **OpenAI Codex CLI**        | ✅ Fully supported |
+| **Cursor**                  | ✅ Fully supported |
+| **GitHub Copilot**          | ✅ Fully supported |
+| **OpenCode**                | ✅ Fully supported |
+| **Qwen**                    | ✅ Fully supported |
+| **Vibe**                    | ✅ Fully supported |
+| **Antigravity**             | ✅ Fully supported |
+
+### Autonomous agents
+
+| Agent                            | Status                                                                                  |
+| -------------------------------- | --------------------------------------------------------------------------------------- |
+| **Hermes Agent** (Nous Research) | ✅ [Fully supported with a dedicated dashboard](#hermes-agent-autonomous-observability) |
 
 More agents added regularly. [Request support for your agent →](https://github.com/VasiHemanth/tokentelemetry/issues)
 
 ---
 
+## Hermes Agent: autonomous observability
+
+Hermes Agent isn't a coding agent — it runs across CLI, messaging platforms (Telegram, Discord, Slack, Feishu, …), scheduled jobs, and webhooks. It gets its own surface at **`/hermes`** with:
+
+- **38 source platforms** — every value Hermes emits in `sessions.source`
+- **Per-API-call latency + cache hit %** parsed from `agent.log`
+- **Inline `delegate_task` subagent cards** with summary, tokens, duration
+- **Skills + memory pages**, **cron health**, **gateway health**, **cost anomaly detection**
+- **Provider-aware pricing** — same model priced correctly across direct / OpenRouter / Together / Fireworks
+
+Run TokenTelemetry on the same host as Hermes — we read `~/.hermes/` locally, no remote-DB mode yet.
+
+---
+
 ## Features
 
+- ☤ **Hermes Agent dashboard** — autonomous-agent observability at `/hermes` (38 source platforms, gateway health, cron jobs, skills, memory, subagent cards — see the [section above](#hermes-agent-autonomous-observability))
 - 📊 **Token Usage Dashboard** — real-time tokens in/out per agent, model, and project
 - 💰 **Cost Tracking** — see exact LLM API costs per session and cumulative over time
 - 🔍 **Session Traces** — waterfall view of prompts, reasoning chains, tool calls, and responses
@@ -75,11 +100,13 @@ More agents added regularly. [Request support for your agent →](https://github
 ### Option 1: One-line installer (recommended)
 
 **macOS / Linux:**
+
 ```bash
 curl -fsSL https://tokentelemetry.com/install.sh | bash
 ```
 
 **Windows (PowerShell):**
+
 ```powershell
 irm https://tokentelemetry.com/install.ps1 | iex
 ```
@@ -101,18 +128,23 @@ Then open: **http://localhost:3000**
 ## What You'll See
 
 ### Dashboard
+
 Connected agents, recent activity feed, model distribution pie chart, token burn rate.
 
 ### Projects View
+
 Per-project heatmap, tool usage breakdown, agent leaderboard, session timeline.
 
 ### Session Trace
+
 Full waterfall: system prompt → reasoning → tool calls → responses → final output. See exactly what your agent was thinking.
 
 ### Analytics
+
 Cumulative token & cost graphs per agent/model over time. Compare efficiency across models.
 
 ### Plans
+
 Captured plan-mode outputs from Claude Code's `/plan` command and equivalent in other agents.
 
 ---
@@ -177,25 +209,51 @@ A: Yes. TokenTelemetry supports Gemini CLI and shows token counts, costs, and se
 **Q: Does it support Cursor or GitHub Copilot?**  
 A: Yes. Cursor and GitHub Copilot sessions are detected and tracked.
 
+### Hermes Agent FAQ
+
+**Q: Is there any other observability tool for Hermes Agent?**  
+A: Not really. Hermes ships its own `/usage` + `/insights` and a bundled Langfuse plugin, but no third-party tool treats it as a first-class agent with a dedicated dashboard. Tracking: [`NousResearch/hermes-agent#6642`](https://github.com/NousResearch/hermes-agent/issues/6642).
+
+**Q: Will it work for my Hermes bot on a VPS?**  
+A: Yes — run TokenTelemetry on the same host (it reads local files), then `ssh -L 3000:localhost:3000 your-vps` to view from your laptop.
+
+**Q: Is "Hermes Agent" the same as the Hermes-3 LLMs?**  
+A: No. Hermes Agent is the [open-source agent framework](https://github.com/NousResearch/hermes-agent); Hermes-3 is a family of fine-tuned models. TokenTelemetry observes the agent — it can be running any model.
+
 ---
 
 ## Comparisons
 
-| Feature | TokenTelemetry | Langfuse | LangSmith | Helicone |
-|---|---|---|---|---|
-| 100% Local | ✅ | ❌ | ❌ | ❌ |
-| Zero config | ✅ | ❌ | ❌ | ❌ |
-| No signup | ✅ | ❌ | ❌ | ❌ |
-| Claude Code support | ✅ | Manual | Manual | Manual |
-| Gemini CLI support | ✅ | Manual | Manual | ❌ |
-| Codex CLI support | ✅ | Manual | Manual | Manual |
-| Free | ✅ | Freemium | Freemium | Freemium |
-| Open Source | ✅ | ✅ | ❌ | ❌ |
+| Feature             | TokenTelemetry | Langfuse | LangSmith | Helicone |
+| ------------------- | -------------- | -------- | --------- | -------- |
+| 100% Local          | ✅             | ❌       | ❌        | ❌       |
+| Zero config         | ✅             | ❌       | ❌        | ❌       |
+| No signup           | ✅             | ❌       | ❌        | ❌       |
+| Claude Code support | ✅             | Manual   | Manual    | Manual   |
+| Gemini CLI support  | ✅             | Manual   | Manual    | ❌       |
+| Codex CLI support   | ✅             | Manual   | Manual    | Manual   |
+| Free                | ✅             | Freemium | Freemium  | Freemium |
+| Open Source         | ✅             | ✅       | ❌        | ❌       |
+
+### Hermes Agent observability landscape
+
+There's no other third-party tool built specifically for Hermes Agent.
+
+| Option                              | Hermes-aware? | Local? | Dedicated UI? |
+| ----------------------------------- | ------------- | ------ | ------------- |
+| Hermes's own `/usage` + `/insights` | ✅            | ✅     | Aggregates only |
+| Bundled Langfuse plugin             | ❌ generic    | Either | Langfuse-shaped |
+| Manual `state.db` / `agent.log` parsing | DIY      | ✅     | Build it yourself |
+| Langfuse / LangSmith / Helicone     | ❌ generic    | ❌     | LLM-shaped |
+| **TokenTelemetry**                  | ✅            | ✅     | `/hermes` dashboard |
+
+Know of another? [Open an issue](https://github.com/VasiHemanth/tokentelemetry/issues) and we'll update this.
 
 ---
 
 ## Use Cases
 
+- **Hermes Agent operators** running a Telegram / Discord / cron bot on a VPS — see costs per platform, gateway health, cron-run history, skills + memory state, all in one place
 - **Individual developers** who want to understand how much their AI coding sessions cost
 - **Teams** comparing Claude Code vs Gemini CLI vs Codex efficiency
 - **Researchers** studying LLM agent behavior, tool call patterns, and reasoning chains
@@ -252,4 +310,4 @@ Want to add support for a new agent? [Open an issue](https://github.com/VasiHema
 
 ---
 
-*If you find TokenTelemetry useful, please ⭐ star this repo — it helps others discover it!*
+_If you find TokenTelemetry useful, please ⭐ star this repo — it helps others discover it!_

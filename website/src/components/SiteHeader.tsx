@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Activity, GitBranch } from "lucide-react";
 
 const NAV = [
+  { label: "Hermes",    href: "#hermes" },
   { label: "Features",  href: "#features" },
   { label: "Agents",    href: "#agents" },
   { label: "FAQ",       href: "#faq" },

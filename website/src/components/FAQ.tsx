@@ -24,8 +24,12 @@ export const FAQ_ITEMS = [
     a: "TokenTelemetry is purpose-built for AI coding agents and is zero-config — no SDK instrumentation. Langfuse and Helicone are general LLM-app observability platforms that require code changes and (typically) a cloud account.",
   },
   {
-    q: "Which coding agents does it support?",
-    a: "Claude Code (Anthropic), OpenAI Codex CLI, Gemini CLI (Google), Cursor, GitHub Copilot, Qwen CLI, OpenCode, Hermes Agent (Nous Research), Vibe, and Antigravity — ten agents total.",
+    q: "Which agents does it support?",
+    a: "Nine coding agents (Claude Code, OpenAI Codex, Gemini CLI, Cursor, GitHub Copilot, Qwen CLI, OpenCode, Vibe, Antigravity) plus Hermes Agent — Nous Research's autonomous agent, which gets its own dedicated dashboard at /hermes with gateway health, scheduled-job monitoring, skills + memory observability, and 38 source platforms (CLI / Telegram / Discord / Feishu / DingTalk / cron / webhook / …).",
+  },
+  {
+    q: "Why does Hermes Agent get its own page?",
+    a: "Hermes is structurally different from coding agents — it runs across messaging platforms (Telegram / Discord / Slack / WhatsApp / Signal / Matrix / Feishu / DingTalk / WeChat), supports persistent skills and memory, delegates to subagents, and runs scheduled cron jobs. Forcing it into the same UI as Claude Code would hide most of what it does, so it gets a dedicated surface that respects its shape.",
   },
 ];
 

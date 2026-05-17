@@ -37,7 +37,7 @@ export default function Hero() {
           {/* Left column — copy + install */}
           <div className="lg:text-left text-center">
             {/* Eyebrow */}
-            <div className="flex lg:justify-start justify-center mb-6">
+            <div className="flex lg:justify-start justify-center mb-3 gap-2 flex-wrap">
               <span className="inline-flex items-center gap-2 px-2.5 h-7 rounded-full text-[11px] font-medium tracking-tight text-[var(--tt-fg-muted)] bg-[var(--tt-panel)] border border-[var(--tt-border)]">
                 <span className="relative flex w-1.5 h-1.5">
                   <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
@@ -49,7 +49,17 @@ export default function Hero() {
                 <span className="text-[var(--tt-fg-faint)]">·</span>
                 MIT
               </span>
+              <a
+                href="#hermes"
+                className="inline-flex items-center gap-2 px-2.5 h-7 rounded-full text-[11px] font-medium tracking-tight text-[#eab308] bg-[#eab308]/8 border border-[#eab308]/30 hover:bg-[#eab308]/12 transition-colors"
+              >
+                New
+                <span className="text-[#eab308]/50">·</span>
+                Hermes Agent observability
+                <ArrowRight size={11} />
+              </a>
             </div>
+            <div className="h-3" />
 
             {/* Headline */}
             <h1 className="text-[32px] sm:text-[52px] lg:text-[58px] xl:text-[64px] leading-[1.08] sm:leading-[1.04] tracking-[-0.025em] font-semibold text-[var(--tt-fg)] mb-5 max-w-4xl mx-auto lg:mx-0">
@@ -57,7 +67,7 @@ export default function Hero() {
                 Token Telemetry
               </span>
               See exactly what your{" "}
-              <span className="text-[var(--tt-brand)]">coding agents</span>{" "}
+              <span className="text-[var(--tt-brand)]">coding &amp; autonomous agents</span>{" "}
               cost, think, and do.
             </h1>
 

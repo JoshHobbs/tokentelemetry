@@ -32,6 +32,8 @@ interface Session {
   artifacts?: Artifact[];
   /** Hermes-only */
   source_subtype?: string;
+  parent_session_id?: string | null;
+  end_reason?: string | null;
 }
 
 interface Event {
@@ -140,6 +142,8 @@ export default function SessionDetailPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [sessionInfo, setSessionInfo] = useState<Session | null>(null);
+  const [hermesOverlay, setHermesOverlay] = useState<any | null>(null);
+  const [allHermesSessions, setAllHermesSessions] = useState<Session[] | null>(null);
 
   // Trace View States
   const [splitView, setSplitView] = useState(false);
@@ -160,6 +164,9 @@ export default function SessionDetailPage() {
         .then(data => {
            const info = data.find((s: any) => s.id === id);
            if (info) setSessionInfo(info);
+           if (agent === "hermes") {
+             setAllHermesSessions(data.filter((s: any) => s.agent === "hermes"));
+           }
         });
 
       // 2. Fetch Detailed Trace
@@ -211,6 +218,14 @@ export default function SessionDetailPage() {
           console.error("Failed to fetch session detail:", err);
           setLoading(false);
         });
+
+      // 3. Hermes-only overlay: per-API-call latency, cache hit, memory I/O
+      if (agent === "hermes") {
+        fetch(`http://127.0.0.1:8000/sessions/${id}/hermes-overlay`)
+          .then(res => res.json())
+          .then(data => setHermesOverlay(data))
+          .catch(() => setHermesOverlay(null));
+      }
     }
   }, [id, agent]);
 
@@ -580,6 +595,12 @@ export default function SessionDetailPage() {
 
           {/* CENTER: Conversation */}
           <section className="overflow-y-auto max-h-[calc(100vh-200px)] p-8">
+             {/* Hermes session chain (compression / branched continuations) */}
+             {agent === "hermes" && sessionInfo && allHermesSessions && (
+               <HermesChainBanner current={sessionInfo} all={allHermesSessions} />
+             )}
+             {/* Hermes performance overlay */}
+             {agent === "hermes" && hermesOverlay && <HermesOverlayCard overlay={hermesOverlay} />}
              <div className={splitView ? "grid grid-cols-2 gap-8" : "space-y-8"}>
                 <div className="space-y-8">
                    {splitView && <h3 className="text-[10px] font-black text-[var(--tt-fg-dim)] uppercase tracking-[0.2em] ml-2 mb-2 flex items-center gap-2"><User size={14}/> User & Agent Dialogue</h3>}
@@ -1150,11 +1171,12 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
      );
   }
 
-  // 4. VIBE / OPENCODE Assistant Response
+  // 4. VIBE / OPENCODE / HERMES Assistant Response
   if (type === "assistant" && payload?.content && !message) {
     const isOpencode = agent === "opencode";
-    const accent = isOpencode ? "bg-amber-600" : "bg-pink-600";
-    const textColor = isOpencode ? "text-[var(--tt-warn-fg)]" : "text-[var(--tt-danger-fg)]";
+    const isHermes = agent === "hermes";
+    const accent = isHermes ? "bg-yellow-500" : isOpencode ? "bg-amber-600" : "bg-pink-600";
+    const textColor = isHermes ? "text-[#eab308]" : isOpencode ? "text-[var(--tt-warn-fg)]" : "text-[var(--tt-danger-fg)]";
     parts.push(
       <div className="bg-[var(--tt-panel)] border border-[var(--tt-border)] rounded-[var(--tt-radius-lg)] p-6 relative overflow-hidden group hover:border-[var(--tt-border-strong)] transition-all text-left">
         <div className={`absolute top-0 left-0 w-1 h-full ${accent}`}></div>
@@ -1197,6 +1219,114 @@ function EventCard({ event, mode = "all", agent }: { event: any, mode?: "dialogu
             <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">output ▸</summary>
             <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">{typeof output === "string" ? output.slice(0, 4000) : JSON.stringify(output, null, 2).slice(0, 4000)}</pre>
           </details>
+        )}
+      </div>
+    );
+  }
+
+  // 5a. HERMES tool_call (with delegate_task special-casing)
+  if (agent === "hermes" && type === "tool_call" && payload && mode !== "dialogue") {
+    const toolName = payload.tool || "unknown";
+    const isDelegate = toolName === "delegate_task";
+    const isMemory = toolName === "memory";
+    const args = payload.args;
+    let goalPreview: string | null = null;
+    if (isDelegate && args && typeof args === "object") {
+      goalPreview = args.goal || args.prompt || args.task || null;
+    }
+    const accent = isDelegate
+      ? "text-violet-300"
+      : isMemory
+      ? "text-cyan-300"
+      : "text-[var(--tt-warn-fg)]";
+    parts.push(
+      <div className={`bg-[var(--tt-panel)]/70 border border-[var(--tt-border)] rounded-[var(--tt-radius)] p-4 group ${isDelegate ? "border-violet-500/30" : isMemory ? "border-cyan-500/30" : ""}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className={`flex items-center gap-2 ${accent} font-black text-[10px] uppercase tracking-[0.2em]`}>
+            {isDelegate ? <GitBranch size={14} strokeWidth={3} /> : <Wrench size={14} strokeWidth={3} />}
+            {isDelegate ? "Subagent · delegate_task" : `Tool · ${toolName}`}
+          </div>
+          {renderTimestamp()}
+        </div>
+        {goalPreview && (
+          <div className="text-[12px] text-[var(--tt-fg)] mb-2 italic">
+            “{goalPreview.length > 240 ? goalPreview.slice(0, 240) + "…" : goalPreview}”
+          </div>
+        )}
+        {args && (
+          <details className="mt-1">
+            <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">arguments ▸</summary>
+            <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-64 overflow-y-auto">{typeof args === "string" ? args : JSON.stringify(args, null, 2)}</pre>
+          </details>
+        )}
+      </div>
+    );
+  }
+
+  // 5b. HERMES tool_result — pair to its tool_call via callID; for delegate_task,
+  // surface the child summary as a richer card with metadata.
+  if (agent === "hermes" && type === "tool_result" && payload && mode !== "dialogue") {
+    const toolName = payload.tool || "";
+    const content = payload.content || "";
+    const isDelegate = toolName === "delegate_task";
+    let parsed: any = null;
+    if (isDelegate && content) {
+      try { parsed = JSON.parse(content); } catch { parsed = null; }
+    }
+    // delegate_task returns {results: [{summary, tokens, duration_seconds, status, ...}], ...}
+    const results = Array.isArray(parsed?.results) ? parsed.results : null;
+    parts.push(
+      <div className={`bg-[var(--tt-panel)]/40 border ${isDelegate ? "border-violet-500/20" : "border-[var(--tt-border)]"} rounded-[var(--tt-radius)] p-4 ml-4 group`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className={`flex items-center gap-2 ${isDelegate ? "text-violet-300" : "text-[var(--tt-fg-muted)]"} font-black text-[10px] uppercase tracking-[0.2em]`}>
+            {isDelegate ? <GitBranch size={14} strokeWidth={3} /> : <Wrench size={14} strokeWidth={3} />}
+            {isDelegate ? `Subagent result${results && results.length > 1 ? ` · ${results.length} children` : ""}` : `Result · ${toolName}`}
+          </div>
+          {renderTimestamp()}
+        </div>
+        {results ? (
+          <div className="space-y-3">
+            {results.map((r: any, i: number) => (
+              <div key={i} className="bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded p-3">
+                <div className="flex items-center justify-between text-[10px] font-mono text-[var(--tt-fg-dim)] mb-1.5">
+                  <span>child #{r.task_index ?? i + 1} · {r.model || "—"}</span>
+                  <span className="flex items-center gap-2">
+                    {typeof r.duration_seconds === "number" && <span>{r.duration_seconds.toFixed(1)}s</span>}
+                    {r.tokens && <span>{(r.tokens.input || 0).toLocaleString()}/{(r.tokens.output || 0).toLocaleString()} tok</span>}
+                    {r.status && (
+                      <span className={r.status === "completed" ? "text-[var(--tt-success-fg)]" : "text-[var(--tt-danger-fg)]"}>
+                        {r.status}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                {r.summary && (
+                  <div className="text-[11px] text-[var(--tt-fg)] whitespace-pre-wrap leading-relaxed">
+                    {r.summary.length > 600 ? r.summary.slice(0, 600) + "…" : r.summary}
+                  </div>
+                )}
+                {Array.isArray(r.tool_trace) && r.tool_trace.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="text-[9px] font-mono text-[var(--tt-fg-dim)] cursor-pointer">tool trace · {r.tool_trace.length} call{r.tool_trace.length === 1 ? "" : "s"} ▸</summary>
+                    <div className="mt-1 space-y-0.5">
+                      {r.tool_trace.map((t: any, j: number) => (
+                        <div key={j} className="text-[10px] font-mono text-[var(--tt-fg-muted)]">
+                          {t.tool || "?"} <span className="text-[var(--tt-fg-dim)]">({t.status || "—"})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : content ? (
+          <details>
+            <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">output · {content.length.toLocaleString()} chars ▸</summary>
+            <pre className="mt-2 text-[10px] font-mono text-[var(--tt-fg-muted)] whitespace-pre-wrap bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-lg p-3 max-h-80 overflow-y-auto">{content.slice(0, 6000)}</pre>
+          </details>
+        ) : (
+          <div className="text-[10px] font-mono text-[var(--tt-fg-dim)] italic">empty result</div>
         )}
       </div>
     );
@@ -1624,6 +1754,130 @@ function ResponseBody({ text, tone = "default" }: { text: string; tone?: "defaul
       >
         {mode === "md" ? "View Raw" : "View MD"}
       </button>
+    </div>
+  );
+}
+
+function HermesOverlayCard({ overlay }: { overlay: any }) {
+  const perf = overlay?.performance;
+  const journey: string[] = overlay?.model_journey || [];
+  const mem = overlay?.memory_io;
+  const apiCalls = overlay?.api_calls || [];
+  if (!perf && journey.length === 0 && (!mem || mem.total === 0)) return null;
+  return (
+    <div className="mb-8 bg-[var(--tt-panel)]/60 border border-[#eab308]/30 rounded-[var(--tt-radius-lg)] p-5 group">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#eab308] flex items-center gap-2">
+          <Activity size={12} strokeWidth={3} /> Hermes performance
+        </div>
+        {journey.length > 1 && (
+          <div className="text-[10px] font-mono text-[var(--tt-fg-muted)] flex items-center gap-1.5">
+            {journey.map((m, i) => (
+              <span key={i} className="flex items-center gap-1.5">
+                {i > 0 && <span className="text-[var(--tt-fg-dim)]">→</span>}
+                <span>{m}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+      {perf && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <Stat label="API calls" value={String(perf.api_call_count)} />
+          <Stat label="Total latency" value={`${perf.total_latency_s}s`} />
+          <Stat label="Avg latency" value={`${perf.avg_latency_s}s`} />
+          <Stat label="Cache hit" value={perf.cache_hit_pct != null ? `${perf.cache_hit_pct}%` : "—"} />
+        </div>
+      )}
+      {mem && mem.total > 0 && (
+        <div className="text-[11px] text-[var(--tt-fg-muted)] mb-3">
+          <span className="text-[var(--tt-cyan-fg)] font-semibold">Memory I/O:</span>{" "}
+          {mem.add_memory > 0 && <span>+{mem.add_memory} memory </span>}
+          {mem.add_user > 0 && <span>+{mem.add_user} user </span>}
+          {mem.replace_memory > 0 && <span>~{mem.replace_memory} memory </span>}
+          {mem.replace_user > 0 && <span>~{mem.replace_user} user </span>}
+          {mem.remove_memory > 0 && <span>-{mem.remove_memory} memory </span>}
+          {mem.remove_user > 0 && <span>-{mem.remove_user} user </span>}
+        </div>
+      )}
+      {apiCalls.length > 0 && (
+        <details>
+          <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">per-call breakdown · {apiCalls.length} call{apiCalls.length === 1 ? "" : "s"} ▸</summary>
+          <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
+            {apiCalls.map((c: any) => (
+              <div key={c.n} className="flex items-center justify-between text-[10px] font-mono text-[var(--tt-fg-muted)] py-1 px-2 hover:bg-[var(--tt-sunken)] rounded">
+                <span>#{c.n} · {c.model}</span>
+                <span className="flex items-center gap-3">
+                  <span>in/out {c.input.toLocaleString()}/{c.output.toLocaleString()}</span>
+                  <span className="text-[var(--tt-fg)]">{c.latency_s}s</span>
+                  {c.cache_hit_pct != null && (
+                    <span className={c.cache_hit_pct >= 80 ? "text-emerald-400" : c.cache_hit_pct >= 40 ? "text-amber-400" : "text-[var(--tt-fg-dim)]"}>
+                      {c.cache_hit_pct}% cache
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+function HermesChainBanner({ current, all }: { current: Session; all: Session[] }) {
+  // Compression-style continuation chain via parent_session_id.
+  // delegate_task subagents are NOT in state.db (verified — see HERMES_INTERNALS.md §1.6).
+  const parent = current.parent_session_id
+    ? all.find((s) => s.id === current.parent_session_id)
+    : null;
+  const children = all.filter((s) => s.parent_session_id === current.id);
+  if (!parent && children.length === 0) return null;
+  const reasonLabel = (r?: string | null) =>
+    r === "compression" ? "compression continuation" :
+    r === "orphaned_compression" ? "orphaned compression" :
+    r === "branched" ? "branched" : null;
+  const cur = reasonLabel(current.end_reason);
+  return (
+    <div className="mb-6 bg-violet-500/5 border border-violet-500/20 rounded-[var(--tt-radius-lg)] p-3">
+      <div className="text-[9px] font-black uppercase tracking-[0.2em] text-violet-300 mb-2 flex items-center gap-2">
+        <GitBranch size={11} strokeWidth={3} /> Session chain
+        {cur && <span className="text-[var(--tt-fg-muted)] font-normal normal-case">· {cur}</span>}
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {parent && (
+          <Link
+            href={`/sessions/${parent.id}?agent=hermes`}
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded px-2 py-1 hover:border-violet-500/50 hover:bg-violet-500/5 text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] transition-colors"
+          >
+            <ChevronLeft size={11} />
+            <span className="truncate max-w-[200px]">{parent.display || parent.id}</span>
+          </Link>
+        )}
+        <span className="text-[10px] tabular text-[var(--tt-fg-dim)] px-1">this</span>
+        {children.map((c) => (
+          <Link
+            key={c.id}
+            href={`/sessions/${c.id}?agent=hermes`}
+            className="inline-flex items-center gap-1.5 text-[11px] font-mono bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded px-2 py-1 hover:border-violet-500/50 hover:bg-violet-500/5 text-[var(--tt-fg-muted)] hover:text-[var(--tt-fg)] transition-colors"
+          >
+            <span className="truncate max-w-[200px]">{c.display || c.id}</span>
+            <ChevronRight size={11} />
+            {reasonLabel(c.end_reason) === "branched" && (
+              <span className="text-[9px] text-violet-300 ml-0.5">branched</span>
+            )}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-[var(--tt-sunken)] border border-[var(--tt-border)] rounded-[var(--tt-radius)] px-3 py-2">
+      <div className="text-[9px] uppercase tracking-[0.18em] text-[var(--tt-fg-dim)]">{label}</div>
+      <div className="text-[14px] font-mono tabular text-[var(--tt-fg)]">{value}</div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { FAQ_ITEMS } from "@/components/FAQ";
 import SiteHeader from "@/components/SiteHeader";
+import MarqueeBanner from "@/components/MarqueeBanner";
 
 const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
 
@@ -11,9 +12,9 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 const SITE_URL = "https://tokentelemetry.com";
-const TITLE = "Token Telemetry (TokenTelemetry) — See exactly what your coding agents cost, think, and do";
+const TITLE = "Token Telemetry — Observability for coding & autonomous agents (Hermes, Claude Code, Codex …)";
 const DESCRIPTION =
-  "Token Telemetry (TokenTelemetry) is local, read-only observability for Claude Code, Codex, Gemini CLI, Cursor, Copilot, and 4 more coding agents. Tokens, traces, cost — one command, no signup, 100% on your machine.";
+  "Token Telemetry is local, read-only observability for 9 coding agents (Claude Code, Codex, Gemini CLI, Cursor, Copilot, Qwen, OpenCode, Vibe, Antigravity) plus Hermes Agent (Nous Research) — with a dedicated dashboard for gateway health, cron jobs, skills, memory, and 38 source platforms. One command, 100% on your machine.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -130,6 +131,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* Single source of background atmosphere */}
         <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 tt-canvas-glow" />
         <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 tt-grid opacity-30" />
+        <MarqueeBanner />
         <SiteHeader />
         {children}
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }} />

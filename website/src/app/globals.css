@@ -114,3 +114,12 @@ body {
 /* Quiet pulse (live indicator) */
 @keyframes tt-pulse { 0%, 100% { opacity: 0.45 } 50% { opacity: 1 } }
 .tt-pulse { animation: tt-pulse 2.4s ease-in-out infinite; }
+
+/* Marquee — infinite horizontal scroll. The content is duplicated and we
+   translate by -50% so the second copy lands exactly where the first started. */
+@keyframes tt-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.tt-marquee-track { animation: tt-marquee 22s linear infinite; }
+.tt-marquee-track:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .tt-marquee-track { animation: none; }
+}

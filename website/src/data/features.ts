@@ -8,6 +8,19 @@ export type Feature = {
 
 export const FEATURES: Feature[] = [
   {
+    id: "hermes",
+    label: "Hermes Agent",
+    headline: "Autonomous agent observability — a different class of agent, its own surface.",
+    bullets: [
+      "Dedicated /hermes dashboard: gateway health, scheduled-job status, source breakdown across 38 platforms (CLI / Telegram / Discord / Slack / Feishu / DingTalk / cron / webhook / …).",
+      "Per-API-call latency and cache-hit % parsed from agent.log — none of the other agents emit this.",
+      "Subagent delegation rendered inline: each delegate_task call expands to show the child's summary, tokens, duration, and tool trace.",
+      "Skills + memory pages: 90 loaded skills with platform conditions, MEMORY.md / USER.md with char-limit progress bars.",
+      "Cost anomaly detection: silent reasoning-token waste (MiMo thinking-mode) flagged automatically.",
+    ],
+    screenshot: "/screenshots/hermes.png",
+  },
+  {
     id: "dashboard",
     label: "Dashboard",
     headline: "A bird's-eye view of your entire agent fleet.",
