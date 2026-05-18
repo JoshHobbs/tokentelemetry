@@ -75,7 +75,7 @@ Hermes Agent isn't a coding agent — it runs across CLI, messaging platforms (T
 - **Skills + memory pages**, **cron health**, **gateway health**, **cost anomaly detection**
 - **Provider-aware pricing** — same model priced correctly across direct / OpenRouter / Together / Fireworks
 
-Run TokenTelemetry on the same host as Hermes — we read `~/.hermes/` locally, no remote-DB mode yet.
+Run TokenTelemetry on the same host as Hermes — we read `$HERMES_HOME` (or `~/.hermes/` if unset) locally, no remote-DB mode yet.
 
 ---
 
