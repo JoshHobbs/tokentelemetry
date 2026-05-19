@@ -77,6 +77,17 @@ Hermes Agent isn't a coding agent — it runs across CLI, messaging platforms (T
 
 Run TokenTelemetry on the same host as Hermes — we read `$HERMES_HOME` (or `~/.hermes/` if unset) locally, no remote-DB mode yet.
 
+### Hermes Dashboard plugin (`:9119` → `:3000`)
+
+If you run Hermes's own web dashboard (`hermes dashboard`, port `9119`), install the plugin so TokenTelemetry shows up as a tab inside it — one port to remember, deep-link cards to every TT page:
+
+```bash
+./scripts/install-hermes-plugin.sh
+hermes dashboard
+```
+
+Pure-frontend launcher, no extra backend, no network access beyond your local TT. See [`plugin/hermes-dashboard/README.md`](plugin/hermes-dashboard/README.md) for details.
+
 ---
 
 ## Features
