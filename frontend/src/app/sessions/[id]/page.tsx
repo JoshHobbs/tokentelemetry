@@ -1804,8 +1804,8 @@ function HermesOverlayCard({ overlay }: { overlay: any }) {
         <details>
           <summary className="text-[10px] font-mono text-[var(--tt-fg-dim)] cursor-pointer hover:text-[var(--tt-fg)]">per-call breakdown · {apiCalls.length} call{apiCalls.length === 1 ? "" : "s"} ▸</summary>
           <div className="mt-2 space-y-1 max-h-64 overflow-y-auto">
-            {apiCalls.map((c: any) => (
-              <div key={c.n} className="flex items-center justify-between text-[10px] font-mono text-[var(--tt-fg-muted)] py-1 px-2 hover:bg-[var(--tt-sunken)] rounded">
+            {apiCalls.map((c: any, i: number) => (
+              <div key={`${c.n ?? "x"}-${i}`} className="flex items-center justify-between text-[10px] font-mono text-[var(--tt-fg-muted)] py-1 px-2 hover:bg-[var(--tt-sunken)] rounded">
                 <span>#{c.n} · {c.model}</span>
                 <span className="flex items-center gap-3">
                   <span>in/out {c.input.toLocaleString()}/{c.output.toLocaleString()}</span>

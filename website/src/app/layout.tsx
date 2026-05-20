@@ -60,14 +60,16 @@ export const metadata: Metadata = {
     siteName: "TokenTelemetry",
     type: "website",
     locale: "en_US",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "TokenTelemetry" }],
+    // Image is served by app/opengraph-image.tsx (dynamic, includes the
+    // "NEW · Hermes Agent" chip and the AI-agents headline).
   },
   twitter: {
     card: "summary_large_image",
     title: TITLE,
     description: DESCRIPTION,
     creator: "@VasiHemanth",
-    images: ["/og.png"],
+    // Twitter image is served by app/twitter-image.tsx if present, else
+    // falls back to the same opengraph-image.tsx.
   },
   robots: {
     index: true,
