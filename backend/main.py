@@ -646,7 +646,10 @@ def _scan_sessions_sync():
                     except: continue
         except: pass
 
-        for sid, sess in list(claude_sessions.items())[:100]:
+        # Sort by recency (newest first) BEFORE truncating — insertion-order
+        # slicing previously dropped genuinely recent sessions when totals
+        # exceeded 100.
+        for sid, sess in sorted(claude_sessions.items(), key=lambda kv: kv[1]["timestamp"], reverse=True)[:100]:
             session_file = claude_file_map.get(sid)
             if session_file:
                 # Discover Claude Project Memory artifacts
@@ -749,7 +752,7 @@ def _scan_sessions_sync():
         except: pass
         
         # Process the 100 most recent sessions
-        for sid, sess in list(codex_sessions.items())[-100:]:
+        for sid, sess in sorted(codex_sessions.items(), key=lambda kv: kv[1]["timestamp"], reverse=True)[:100]:
             rollout_file = codex_file_map.get(sid)
             if rollout_file:
                 try:
