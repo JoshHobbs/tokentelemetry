@@ -25,8 +25,8 @@
           "href": "/"
         },
         {
-          "title": "Accurate project for Antigravity CLI sessions",
-          "description": "CLI sessions are now grouped under the exact project folder they ran in, read from each session's own saved record — so the grouping stays correct over time. Sessions that never entered a project stay under \"unassigned\".",
+          "title": "Accurate, stable project for Antigravity CLI sessions",
+          "description": "CLI sessions are now grouped under the exact folder they worked in, read from each session's own saved record — so the grouping stays correct over time instead of guessing from task text. Sessions that genuinely never entered a project (pure chat/research) stay grouped separately, off the Projects view.",
           "href": "/"
         }
       ]
