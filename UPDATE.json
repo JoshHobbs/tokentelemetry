@@ -21,6 +21,11 @@
           "title": "Full subscription-cost disclaimer",
           "description": "The dashboard's \"API equiv. (est.)\" figure used to cut off mid-sentence at \"Subscription users p…\". The disclaimer now shows in full, plus a persistent callout makes clear the number re-prices your usage at API list rates for comparing sessions — it is not an invoice. On a flat-fee plan like Claude Pro/Max or Copilot, your actual spend is much lower.",
           "href": "/"
+        },
+        {
+          "title": "Per-agent billing mode — bill vs. estimate, framed right",
+          "description": "If you pay per token (API key) for an agent, the cost figure approximates your real bill; on a flat subscription it's only an API-list-price equivalent. TokenTelemetry now auto-detects which one you're on per agent (from each agent's own auth — e.g. ~/.codex/auth.json) and frames the number accordingly, with a Settings → Billing & cost control to override any agent.",
+          "href": "/settings"
         }
       ]
     },

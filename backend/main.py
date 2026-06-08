@@ -1468,8 +1468,7 @@ async def get_version():
 async def root():
     return {"message": "TokenTelemetry API is running"}
 
-@app.get("/agents")
-async def get_available_agents():
+def _list_available_agents() -> list:
     agents = []
     if CLAUDE_DIR.exists(): agents.append("claude")
     if CODEX_DIR.exists(): agents.append("codex")
@@ -1486,6 +1485,11 @@ async def get_available_agents():
     if GROK_SESSIONS_DIR.exists(): agents.append("grok")
     # if OLLAMA_DIR.exists(): agents.append("ollama")
     return agents
+
+
+@app.get("/agents")
+async def get_available_agents():
+    return _list_available_agents()
 
 # @app.get("/local-runtime")
 # async def get_local_runtime():
@@ -3563,6 +3567,47 @@ async def put_power_config(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail="Could not save power config to disk.")
     _invalidate_sessions_cache()
     return {**cfg, "configured": True}
+
+
+@app.get("/config/billing")
+async def get_billing_config():
+    """Per-agent billing mode (how to frame the cost figure for each agent).
+
+    Returns one entry per *detected* agent with its resolved `mode`
+    (subscription | api | local | unknown), the `source` of that value
+    (user | detected | default), the raw auto-`detected` value (or null), the
+    static `default`, and a human `detect_source` note. The cost math is
+    unchanged by this — it only drives the UI's label/disclaimer.
+    """
+    from billing_mode import get_all, MODES
+    agents = _list_available_agents()
+    return {"agents": get_all(agents), "modes": list(MODES)}
+
+
+@app.put("/config/billing")
+async def put_billing_config(payload: dict = Body(...)):
+    """Set or clear one agent's billing-mode override.
+
+    Body: {"agent": "<agent>", "mode": "<mode>" | null}. A null/absent mode
+    clears the override and reverts the agent to auto-detection. Invalid input is
+    rejected with a plain message (no raw errors).
+    """
+    from fastapi import HTTPException
+    from billing_mode import save_override, get_all, MODES
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    agent = payload.get("agent")
+    if not isinstance(agent, str) or not agent.strip():
+        raise HTTPException(status_code=400, detail="'agent' is required")
+    mode = payload.get("mode")
+    if mode is not None and mode not in MODES:
+        raise HTTPException(status_code=400, detail=f"'mode' must be one of {list(MODES)} or null")
+    try:
+        save_override(agent.strip(), mode)
+    except OSError:
+        raise HTTPException(status_code=500, detail="Could not save billing config to disk.")
+    _invalidate_sessions_cache()
+    return {"agents": get_all(_list_available_agents()), "modes": list(MODES)}
 
 
 @app.get("/config/aliases")
