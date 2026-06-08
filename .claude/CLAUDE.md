@@ -81,7 +81,7 @@ The hook is intentionally narrow. Cases:
 ## Other project conventions
 
 - **Schedules page is read-only.** The CRUD UI was built but is commented out under `# DISABLED-MUTATIONS:` markers in `backend/main.py`. Re-enable by uncommenting; don't reimplement.
-- **Backend default port: 8000** (matches `bin/cli.js`). If you start uvicorn elsewhere, frontend's `NEXT_PUBLIC_API_BASE` must follow.
+- **Backend default port: 8000** (matches `bin/cli.js`). The frontend derives its API base from `window.location` + `NEXT_PUBLIC_API_PORT` at runtime (set by `bin/cli.js` from `--api-port`), so a non-default port works automatically. `NEXT_PUBLIC_API_BASE` still works as an explicit override (pin a fixed host) but is no longer required just to change the port. For remote/tailnet access use `--host` / `--allowed-origins` (envs `TT_HOST` / `TT_ALLOWED_ORIGINS`); default stays loopback-only.
 - **`UPDATE.json` is committed.** It's not generated, not gitignored. Treat it as source code.
 - **Test pollution: clear `~/.tokentelemetry/.update-check.json`** if you manually seed it for testing; the SHA validator added in PR #34 catches obvious garbage but doesn't catch all dev mistakes.
 
