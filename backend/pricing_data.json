@@ -17026,9 +17026,9 @@
       "out": 1.2
     },
     "opencode-go\u0000minimax-m3": {
-      "cached_read": 0.12,
-      "in": 0.6,
-      "out": 2.4
+      "cached_read": 0.06,
+      "in": 0.3,
+      "out": 1.2
     },
     "opencode-go\u0000qwen3.5-plus": {
       "cached_read": 0.02,
