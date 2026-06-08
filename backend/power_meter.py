@@ -75,11 +75,16 @@ def _macos_battery_watts() -> Optional[float]:
     out = _run(["ioreg", "-r", "-c", "AppleSmartBattery"])
     if not out:
         return None
-    external = re.search(r'"ExternalConnected"\s*=\s*(Yes|No)', out)
+    # Quotes are optional, but a preceding alphanumeric boundary is required so we
+    # don't match the standalone keys inside longer ones — e.g. AppleRaw*External
+    # *Connected*, Maximum*Pack*Voltage*, Soc1*Voltage*, Cell*Voltage*. ioreg quotes
+    # top-level keys; tolerating the unquoted form too just makes us version/format
+    # robust without those collisions.
+    external = re.search(r'(?<![A-Za-z0-9])"?ExternalConnected"?\s*=\s*(Yes|No)', out)
     if external and external.group(1) == "Yes":
         return None  # on AC → battery current ~0, not a usable signal
-    amp = re.search(r'"InstantAmperage"\s*=\s*(-?\d+)', out)
-    volt = re.search(r'"Voltage"\s*=\s*(\d+)', out)
+    amp = re.search(r'(?<![A-Za-z0-9])"?InstantAmperage"?\s*=\s*(-?\d+)', out)
+    volt = re.search(r'(?<![A-Za-z0-9])"?Voltage"?\s*=\s*(\d+)', out)
     if not amp or not volt:
         return None
     # InstantAmperage is a signed value often stored as an unsigned 64-bit int —
@@ -164,7 +169,7 @@ def capability() -> Dict[str, Any]:
         on_ac = True
         out = _run(["ioreg", "-r", "-c", "AppleSmartBattery"])
         if out:
-            m = re.search(r'"ExternalConnected"\s*=\s*(Yes|No)', out)
+            m = re.search(r'(?<![A-Za-z0-9])"?ExternalConnected"?\s*=\s*(Yes|No)', out)
             on_ac = not (m and m.group(1) == "No")
         return {
             "available": not on_ac,

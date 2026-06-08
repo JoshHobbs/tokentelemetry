@@ -115,6 +115,51 @@ def test_implausible_reading_discarded(monkeypatch):
     assert pm.read_power_watts() is None  # negative → None
 
 
+def test_macos_battery_unquoted_form(monkeypatch):
+    """Grok E16: the exact unquoted ioreg-style string must also parse (~3.7 W)."""
+    monkeypatch.setattr(pm.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(pm, "_run", lambda *a, **k:
+        "ExternalConnected = No\nInstantAmperage = 18446744073709551334\nVoltage = 13182")
+    w = pm._macos_battery_watts()
+    assert 3 < w < 4
+
+
+def test_macos_battery_key_collisions(monkeypatch):
+    """The standalone keys must win over longer ones that contain them
+    (AppleRawExternalConnected, Soc1Voltage, MaximumPackVoltage)."""
+    blob = (
+        '"AppleRawExternalConnected" = Yes\n'
+        '"Soc1Voltage" = 0\n'
+        '"MaximumPackVoltage" = 13362\n'
+        '"ExternalConnected" = No\n'
+        '"InstantAmperage" = -300\n'
+        '"Voltage" = 13000'
+    )
+    monkeypatch.setattr(pm.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(pm, "_run", lambda *a, **k: blob)
+    # On battery (the real ExternalConnected=No, not the AppleRaw=Yes), 0.3A*13V≈3.9W
+    w = pm._macos_battery_watts()
+    assert 3.8 < w < 4.0  # used Voltage=13000, not Soc1Voltage=0 or Pack=13362
+
+
+def test_local_endpoint_scheme_insensitive(tmp_path, monkeypatch):
+    """Grok C10: an https request should match an http-listed LAN endpoint."""
+    monkeypatch.setenv("TOKENTELEMETRY_HOME", str(tmp_path))
+    (tmp_path / ".tokentelemetry").mkdir()
+    (tmp_path / ".tokentelemetry" / "power.json").write_text(
+        '{"localEndpoints": ["http://192.168.1.50:11434"]}')
+    assert pc.is_local_session(endpoint="https://192.168.1.50:11434/api/chat") is True
+    assert pc.is_local_session(endpoint="http://10.0.0.9:11434") is False
+
+
+def test_cost_per_kwh_upper_bound(tmp_path, monkeypatch):
+    """Grok E20: an absurd costPerKwh must be rejected like loadWatts is."""
+    monkeypatch.setenv("TOKENTELEMETRY_HOME", str(tmp_path))
+    pc.save_power_config({"costPerKwh": 0.2})
+    pc.save_power_config({"costPerKwh": 999999})  # absurd
+    assert pc.load_power_config()["costPerKwh"] == 0.2  # unchanged
+
+
 def test_save_rejects_garbage_watts(tmp_path, monkeypatch):
     """Regression: an absurd loadWatts can never be persisted to config."""
     monkeypatch.setenv("TOKENTELEMETRY_HOME", str(tmp_path))

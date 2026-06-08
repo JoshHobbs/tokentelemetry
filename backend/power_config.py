@@ -45,6 +45,9 @@ DEFAULT_LOAD_WATTS = 80
 # unsigned battery counter), so it can never reach the cost math.
 MAX_LOAD_WATTS = 10000
 DEFAULT_COST_PER_KWH = 0.15
+# A realistic electricity tariff is well under this; reject absurd values so a
+# fat-fingered or garbage rate can't blow up the electricity estimate.
+MAX_COST_PER_KWH = 100.0
 DEFAULT_SUBSCRIPTION_ENDPOINTS: List[str] = []
 # Extra endpoints (beyond loopback) the user runs models on locally, e.g. a LAN
 # box at http://192.168.1.50:11434. Loopback is always treated as local.
@@ -103,7 +106,7 @@ def local_power_enabled() -> bool:
     lw = raw.get("loadWatts")
     cpk = raw.get("costPerKwh")
     lw_ok = isinstance(lw, (int, float)) and not isinstance(lw, bool) and 0 < lw <= MAX_LOAD_WATTS
-    cpk_ok = isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and cpk >= 0
+    cpk_ok = isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and 0 <= cpk <= MAX_COST_PER_KWH
     return bool(lw_ok or cpk_ok)
 
 
@@ -133,7 +136,7 @@ def load_power_config() -> Dict[str, Any]:
         config["loadWatts"] = int(lw)
 
     cpk = raw.get("costPerKwh")
-    if isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and cpk >= 0:
+    if isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and 0 <= cpk <= MAX_COST_PER_KWH:
         config["costPerKwh"] = float(cpk)
 
     eps = raw.get("subscriptionEndpoints")
@@ -164,7 +167,7 @@ def save_power_config(updates: Dict[str, Any]) -> Dict[str, Any]:
         config["loadWatts"] = int(lw)
 
     cpk = updates.get("costPerKwh")
-    if isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and cpk >= 0:
+    if isinstance(cpk, (int, float)) and not isinstance(cpk, bool) and 0 <= cpk <= MAX_COST_PER_KWH:
         config["costPerKwh"] = float(cpk)
 
     eps = updates.get("subscriptionEndpoints")
@@ -214,12 +217,13 @@ def is_subscription_endpoint(
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]")
 
 
+def _strip_scheme(url: str) -> str:
+    """Drop a leading scheme so 'http://host:port/x' and 'host:port' compare equal."""
+    return url.split("://", 1)[1] if "://" in url else url
+
+
 def _is_loopback(endpoint: str) -> bool:
-    ep = endpoint.lower()
-    # Strip scheme so "http://localhost:11434" and "localhost" both match.
-    if "://" in ep:
-        ep = ep.split("://", 1)[1]
-    host = ep.split("/", 1)[0]
+    host = _strip_scheme(endpoint.lower()).split("/", 1)[0]
     return any(host == h or host.startswith(h + ":") for h in _LOOPBACK_HOSTS)
 
 
@@ -245,9 +249,11 @@ def is_local_session(
             return True
         if config is None:
             config = load_power_config()
-        ep = endpoint.lower().strip()
+        # Match on host[:port], scheme-insensitive — a user who lists
+        # http://192.168.1.50:11434 should still match an https request to it.
+        ep = _strip_scheme(endpoint.lower().strip())
         for le in config.get("localEndpoints", []):
-            s = le.lower().strip()
+            s = _strip_scheme(le.lower().strip())
             if s and (s in ep or ep in s):
                 return True
     if provider and provider.lower().strip() in LOCAL_PROVIDERS:
