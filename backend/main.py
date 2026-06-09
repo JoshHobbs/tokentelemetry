@@ -389,6 +389,109 @@ def _antigravity_db_meta(db_path: Path) -> Dict[str, Optional[str]]:
     return {"model": model, "project": project}
 
 
+# --- Antigravity CLI per-step trace -----------------------------------------
+# agy stores each trajectory step as a protobuf blob in conversations/<id>.db.
+# We have no .proto schema, so (like the metadata reader above) we pattern-match
+# the readable text + tool call out of the bytes — robust enough for a scrubbable
+# trace. step_type is a stable discriminator across recent agy builds.
+_AG_STEP_USER = 14            # the user's prompt
+_AG_STEP_REASONING = 15       # assistant reasoning narrative + a tool call
+_AG_STEP_TOOL_OUTPUT = 21     # result of a tool call
+_AG_STEP_SKIP = {90, 98, 23}  # system EPHEMERAL prompt, internal id, bare file ref
+_AG_TOOLNAME_RE = re.compile(rb'\x12.([a-z_]{3,40})\x1a')
+_AG_TEXT_RE = re.compile(rb'[\x09\x0a\x20-\x7e]{16,}')
+_AG_ARGJSON_RE = re.compile(rb'\{(?:[^{}\\]|\\.|\{(?:[^{}\\]|\\.)*\})*\}')
+
+
+def _ag_best_text(payload: bytes) -> str:
+    """Longest readable text run in a step blob, excluding JSON arg objects."""
+    runs = [t.decode("utf-8", "ignore") for t in _AG_TEXT_RE.findall(payload or b"")]
+    runs = [r for r in runs if not r.lstrip().startswith("{")]
+    if not runs:
+        return ""
+    # Trim a leading 1-2 char protobuf framing token ("k\nicheck…" → "icheck…").
+    txt = max(runs, key=len).strip()
+    txt = re.sub(r"^[a-zA-Z]{1,2}\n", "", txt)
+    return txt.strip()
+
+
+def _ag_tool_call(payload: bytes):
+    """(tool_name, parsed_args|None) for a step blob, or (None, None)."""
+    m = _AG_TOOLNAME_RE.search(payload or b"")
+    if not m:
+        return None, None
+    name = m.group(1).decode("ascii", "ignore")
+    args = None
+    jm = _AG_ARGJSON_RE.search(payload or b"")
+    if jm:
+        try:
+            args = json.loads(jm.group(0).decode("utf-8", "ignore"))
+        except Exception:
+            args = None
+    return name, args
+
+
+def _ag_event(role: str, content: list, sid: str, idx: int, order: int) -> Dict[str, Any]:
+    return {
+        "id": f"{sid}-step-{idx}",
+        "type": role,                       # "user" | "assistant"
+        "role": role,
+        "message": {"role": role, "content": content},
+        "normalized_timestamp": order * 1000,
+    }
+
+
+def _antigravity_cli_trace(db_path: Path, session_id: str) -> List[Dict[str, Any]]:
+    """Build a Claude-format per-step trace from an agy session's SQLite steps.
+
+    Returns events the existing viewer renders (user / reasoning / tool / tool
+    output), or [] when nothing usable is found (caller falls back to brain)."""
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        rows = con.execute(
+            "SELECT idx, step_type, step_payload FROM steps ORDER BY idx"
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        con.close()
+
+    msgs: List[Dict[str, Any]] = []
+    order = 0
+    for idx, stype, payload in rows:
+        if stype in _AG_STEP_SKIP or not payload:
+            continue
+        text = _ag_best_text(payload)
+        if stype == _AG_STEP_USER:
+            if not text:
+                continue
+            order += 1
+            msgs.append(_ag_event("user", [{"type": "text", "text": text}], session_id, idx, order))
+        elif stype == _AG_STEP_TOOL_OUTPUT:
+            if not text:
+                continue
+            order += 1
+            msgs.append(_ag_event("user", [{"type": "tool_result", "content": text[:6000]}], session_id, idx, order))
+        else:
+            tool, args = _ag_tool_call(payload)
+            # Reasoning narrative and the tool call are split into separate steps
+            # so both are counted and render distinctly (thinking → reasoning, the
+            # call → tool).
+            if stype == _AG_STEP_REASONING and text and not text.lstrip().startswith(("{", "<")):
+                order += 1
+                msgs.append(_ag_event("assistant", [{"type": "thinking", "text": text}], session_id, idx, order))
+            if tool:
+                order += 1
+                msgs.append(_ag_event("assistant", [{"type": "tool_use", "name": tool, "input": args or {"preview": text[:600]}}], session_id, idx, order))
+            elif stype != _AG_STEP_REASONING and text:
+                order += 1
+                msgs.append(_ag_event("assistant", [{"type": "text", "text": text}], session_id, idx, order))
+    return msgs
+
+
 def _antigravity_cli_meta(cli_dir: Path = ANTIGRAVITY_CLI_DIR) -> Dict[str, Dict[str, Any]]:
     """Enrich Antigravity CLI (`agy`) sessions from its own stores.
 
@@ -3109,6 +3212,19 @@ async def get_session_detail(session_id: str, agent: str):
         return events
 
     elif agent in ["gemini", "antigravity"]:
+        # Antigravity CLI (agy) sessions store the real per-step trajectory in
+        # conversations/<id>.db — far richer than the brain markdown. Prefer it.
+        if agent == "antigravity":
+            cli_db = ANTIGRAVITY_CLI_DIR / "conversations" / f"{session_id}.db"
+            if cli_db.exists():
+                cli_msgs = _antigravity_cli_trace(cli_db, session_id)
+                if cli_msgs:
+                    return {
+                        "sessionId": session_id,
+                        "projectHash": "",
+                        "kind": "antigravity_cli",
+                        "messages": cli_msgs,
+                    }
         # Antigravity brain-based session (has no .json file; synthesize from markdown artifacts)
         brain_dir = ANTIGRAVITY_BRAIN_DIR / session_id
         for _bd in ANTIGRAVITY_BRAIN_DIRS:
