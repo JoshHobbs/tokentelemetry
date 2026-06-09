@@ -39,7 +39,7 @@ function die(msg) {
 // Accepts --port / --api-port (and -p / -a shorthands), in `--flag value` or
 // `--flag=value` form. Anything unknown triggers the help text.
 function parseArgs(argv) {
-  const out = { frontPort: 3000, apiPort: 8000, host: '127.0.0.1', allowedOrigins: '', authToken: '', insecureNoAuth: false };
+  const out = { frontPort: 3000, apiPort: 8000, host: '127.0.0.1', allowedOrigins: '', authToken: '', insecureNoAuth: false, dataDir: null };
   const take = (i) => {
     if (i + 1 >= argv.length) die(`expected a value after ${argv[i]}`);
     return argv[i + 1];
@@ -48,6 +48,10 @@ function parseArgs(argv) {
     const n = parseInt(raw, 10);
     if (!Number.isFinite(n) || n < 1 || n > 65535) die(`invalid port: ${raw}`);
     out[key] = n;
+  };
+  const setDataDir = (raw) => {
+    if (!raw || !raw.trim()) die('expected a path after --data-dir');
+    out.dataDir = raw;
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -63,6 +67,8 @@ function parseArgs(argv) {
     else if (a === '--auth-token')             { out.authToken = take(i); i++; }
     else if (a.startsWith('--auth-token='))    { out.authToken = a.slice('--auth-token='.length); }
     else if (a === '--insecure-no-auth')       { out.insecureNoAuth = true; }
+    else if (a === '-d' || a === '--data-dir') { setDataDir(take(i)); i++; }
+    else if (a.startsWith('--data-dir='))      { setDataDir(a.slice('--data-dir='.length)); }
     else die(`unknown argument: ${a}\nRun with --help for usage.`);
   }
   return out;
@@ -93,6 +99,8 @@ function printHelp() {
     'Options:',
     '  -p, --port <N>            Frontend (Next.js) port. Default 3000.',
     '  -a, --api-port <N>        Backend (FastAPI) port. Default 8000.',
+    '  -d, --data-dir <P>        Where TokenTelemetry stores its config + state.',
+    '                            Default ~/.tokentelemetry (sets TOKENTELEMETRY_DATA_DIR).',
     '      --host <ADDR>         Backend bind address. Default 127.0.0.1 (loopback).',
     '                            Use 0.0.0.0 (or an interface IP) to expose remotely.',
     '      --allowed-origins <L> Comma-separated hosts allowed to load the dashboard',
@@ -110,11 +118,28 @@ function printHelp() {
     '  start.sh -p 4000                         # frontend on 4000, backend stays 8000',
     '  start.sh --host 0.0.0.0 \\               # expose on a tailnet/LAN (token auto-gen)',
     '    --allowed-origins box.tailnet.ts.net,100.64.0.1',
+    '  start.sh --data-dir /mnt/d/tt-data       # store config + state on D:',
   ].join('\n'));
 }
 
 function run(cmd, args, opts = {}) {
-  const res = spawnSync(cmd, args, { stdio: 'inherit', shell: isWindows, ...opts });
+  // On Windows we spawn through the shell so PATH-resolved commands (`py`, the
+  // python launcher, etc.) work — but cmd.exe re-parses the line and does NOT
+  // quote for us. When the repo lives in a path with spaces (e.g.
+  // D:\Project Files\…\backend\venv\Scripts\python.exe) the command breaks at
+  // the first space ("'D:\Project ' is not recognized…"). Quote the command and
+  // any arg containing whitespace or a shell metachar. No-op on macOS/Linux,
+  // where shell is off and the args are passed through verbatim.
+  const useShell = isWindows;
+  const quote = (s) => {
+    s = String(s);
+    return useShell && /[\s"&|<>^()]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+  };
+  const res = spawnSync(
+    useShell ? quote(cmd) : cmd,
+    useShell ? args.map(quote) : args,
+    { stdio: 'inherit', shell: useShell, ...opts },
+  );
   if (res.status !== 0) die(`"${cmd} ${args.join(' ')}" exited with ${res.status}`);
 }
 
@@ -240,7 +265,14 @@ function ensureFrontend() {
 }
 
 async function start() {
-  const { frontPort, apiPort, host, allowedOrigins, authToken, insecureNoAuth } = parseArgs(process.argv.slice(2));
+  const { frontPort, apiPort, host, allowedOrigins, authToken, insecureNoAuth, dataDir } = parseArgs(process.argv.slice(2));
+
+  // --data-dir is just a friendly front-end for TOKENTELEMETRY_DATA_DIR, which
+  // the Python backend reads (tt_paths.data_dir). An explicit flag wins over an
+  // env var the user may already have exported.
+  const backendEnv = dataDir
+    ? { ...process.env, TOKENTELEMETRY_DATA_DIR: dataDir }
+    : process.env;
 
   console.log('\nTokenTelemetry');
   console.log('--------------');
@@ -300,11 +332,12 @@ async function start() {
     stdio: 'inherit',
     // detached on POSIX gives us a process group we can signal as a unit
     detached: !isWindows,
+    // backendEnv carries TOKENTELEMETRY_DATA_DIR when --data-dir is set.
     // TT_ALLOWED_ORIGINS opts extra hosts into the backend's CORS allowlist.
     // TT_AUTH_TOKEN (when set) turns on the remote-access gate; empty == off.
     // TT_REMOTE_CONNECT_URL backs the loopback-only /remote-access (QR) endpoint.
     env: {
-      ...process.env,
+      ...backendEnv,
       TT_ALLOWED_ORIGINS: allowed,
       TT_AUTH_TOKEN: resolvedToken,
       TT_REMOTE_CONNECT_URL: connectUrl,
@@ -332,6 +365,14 @@ async function start() {
   const dashUrl = `http://${displayHost}:${frontPort}`;
   console.log(`\nDashboard:  ${dashUrl}`);
   console.log(`API:        http://${displayHost}:${apiPort}`);
+
+  try {
+    const resolvedDataDir = require('child_process').spawnSync(venvPython, ['-c', 'from tt_paths import data_dir; print(data_dir())'], { cwd: backendDir, encoding: 'utf8', env: backendEnv }).stdout.trim();
+    if (resolvedDataDir) console.log(`Data dir:   ${resolvedDataDir}`);
+  } catch (_) {
+    if (dataDir) console.log(`Data dir:   ${dataDir}`);
+  }
+
   if (authMode === 'token') {
     console.log('\n──────────────────────────────────────────────────────────');
     console.log('Remote access is ON. Other devices must enter this token:');
